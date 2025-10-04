@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>WRS Feature Test</title>
+  <meta name="description" content="Testing new WRS features">
+</head>
+<body>
+  <!-- Deep nesting test (should warn at 25+ levels) -->
+  <div><div><div><div><div><div><div><div><div><div>
+    <div><div><div><div><div><div><div><div><div><div>
+      <div><div><div><div><div><div><div><div><div><div>
+        <p>This is 30 levels deep!</p>
+      </div></div></div></div></div></div></div></div></div></div>
+    </div></div></div></div></div></div></div></div></div></div>
+  </div></div></div></div></div></div></div></div></div></div>
+
+  <!-- Large DOM test (should warn at 800+ elements) -->
+  <ul>
+    <li>Item 1</li>
+    <li>Item 2</li>
+    <li>Item 3</li>
+    <!-- Imagine 800+ list items here -->
+  </ul>
+
+  <!-- Heavy dependencies test -->
+  <script type="module">
+    import moment from 'moment'; // Should warn: 67KB
+    import lodash from 'lodash'; // Should warn: 72KB
+    import { Chart } from 'chart.js'; // Should warn: 150KB
+
+    // Total: ~289KB estimated
+    // Should trigger: "Estimated JS bundle size: ~289KB" warning
+  </script>
+</body>
+</html>

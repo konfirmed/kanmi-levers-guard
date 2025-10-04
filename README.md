@@ -23,6 +23,13 @@ A VSCode extension that provides instant, real-time feedback on SEO and performa
 - **Resource hints**: Suggest preconnect for external domains
 - **Third-party scripts**: Budget enforcement (configurable limit)
 
+### Google WRS Optimization 🎯 (NEW in v0.2.0)
+- **DOM size monitoring**: Warns at 800+ elements, errors at 1,500+ (Google WRS limits)
+- **DOM depth tracking**: Detects excessive nesting >25 levels, errors at 32+ (WRS render limit)
+- **JavaScript bundle size estimation**: Analyzes imports, warns about heavy dependencies
+- **Google's 15MB limit**: Alerts at 10MB, critical warnings at 14MB
+- **Heavy dependency detection**: Identifies moment, lodash, jquery, and 7 more with lighter alternatives
+
 ### Developer Experience 🎯
 - **Real-time diagnostics**: See issues as you type
 - **Contextual warnings**: Severity levels (Error, Warning, Info)

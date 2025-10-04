@@ -63,6 +63,41 @@ function within(n: number, min: number, max: number): boolean {
 }
 
 /**
+ * Calculate maximum DOM nesting depth for WRS optimization.
+ * Uses a simple stack-based approach to track nested elements.
+ */
+function calculateMaxDOMDepth(html: string): number {
+  let maxDepth = 0;
+  let currentDepth = 0;
+
+  // Match opening and closing tags
+  const tagRegex = /<\/?([a-zA-Z][a-zA-Z0-9]*)[^>]*>/g;
+  const selfClosingTags = new Set(['area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input', 'link', 'meta', 'param', 'source', 'track', 'wbr']);
+
+  let match;
+  while ((match = tagRegex.exec(html)) !== null) {
+    const fullTag = match[0];
+    const tagName = match[1].toLowerCase();
+
+    // Skip self-closing tags and void elements
+    if (selfClosingTags.has(tagName) || fullTag.endsWith('/>')) {
+      continue;
+    }
+
+    if (fullTag.startsWith('</')) {
+      // Closing tag - decrease depth
+      currentDepth = Math.max(0, currentDepth - 1);
+    } else {
+      // Opening tag - increase depth
+      currentDepth++;
+      maxDepth = Math.max(maxDepth, currentDepth);
+    }
+  }
+
+  return maxDepth;
+}
+
+/**
  * Activate the extension.
  */
 export function activate(context: vscode.ExtensionContext) {
@@ -236,7 +271,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     // HTML size estimation (warn if >100KB)
     const htmlSizeKB = Buffer.byteLength(text, 'utf8') / 1024;
-    if (htmlSizeKB > 100) {
+    if (htmlSizeKB > 100 && htmlSizeKB <= 150) {
       diagnostics.push(
         buildDiagnostic(
           new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1)),
@@ -245,12 +280,81 @@ export function activate(context: vscode.ExtensionContext) {
           vscode.DiagnosticSeverity.Warning
         )
       );
-    } else if (htmlSizeKB > 150) {
+    } else if (htmlSizeKB > 150 && htmlSizeKB <= 10000) {
       diagnostics.push(
         buildDiagnostic(
           new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1)),
           `HTML file is ${Math.round(htmlSizeKB)}KB - larger than 90% of websites. This impacts parsing performance.`,
           'PERF_HTML_SIZE_EXCESSIVE',
+          vscode.DiagnosticSeverity.Error
+        )
+      );
+    } else if (htmlSizeKB > 10000) {
+      // WRS: Google's 15MB limit warning
+      diagnostics.push(
+        buildDiagnostic(
+          new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1)),
+          `HTML file is ${Math.round(htmlSizeKB/1024)}MB. Approaching Google's 15MB WRS limit. Consider pagination or dynamic loading.`,
+          'WRS_HTML_SIZE_APPROACHING_LIMIT',
+          vscode.DiagnosticSeverity.Warning
+        )
+      );
+    }
+    if (htmlSizeKB > 14000) {
+      diagnostics.push(
+        buildDiagnostic(
+          new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1)),
+          `HTML file is ${Math.round(htmlSizeKB/1024)}MB. Google WRS will truncate at 15MB. URGENT: Reduce file size!`,
+          'WRS_HTML_SIZE_CRITICAL',
+          vscode.DiagnosticSeverity.Error
+        )
+      );
+    }
+
+    // WRS: DOM size optimization (Google recommends < 1,500 elements)
+    // Count opening tags (excluding self-closing and closing tags)
+    const openingTags = text.match(/<[a-zA-Z][^/>]*>/g) || [];
+    const totalElements = openingTags.length;
+
+    if (totalElements > 800) {
+      diagnostics.push(
+        buildDiagnostic(
+          new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1)),
+          `DOM has ${totalElements} elements. Google WRS recommends < 800 for optimal rendering. Consider pagination or lazy loading.`,
+          'WRS_DOM_SIZE_WARNING',
+          vscode.DiagnosticSeverity.Information
+        )
+      );
+    }
+    if (totalElements > 1500) {
+      diagnostics.push(
+        buildDiagnostic(
+          new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1)),
+          `DOM has ${totalElements} elements. Google WRS hard limit is 1,500. Page may not render correctly in search results.`,
+          'WRS_DOM_SIZE_EXCEEDED',
+          vscode.DiagnosticSeverity.Error
+        )
+      );
+    }
+
+    // WRS: DOM depth check (Google recommends < 32 levels)
+    const maxDepth = calculateMaxDOMDepth(text);
+    if (maxDepth > 25) {
+      diagnostics.push(
+        buildDiagnostic(
+          new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1)),
+          `DOM depth is ${maxDepth} levels. Google WRS recommends < 32 to avoid rendering issues. Flatten your HTML structure.`,
+          'WRS_DOM_DEPTH_WARNING',
+          vscode.DiagnosticSeverity.Information
+        )
+      );
+    }
+    if (maxDepth > 32) {
+      diagnostics.push(
+        buildDiagnostic(
+          new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1)),
+          `DOM depth is ${maxDepth} levels - exceeds Google WRS limit of 32. Googlebot may fail to render this page.`,
+          'WRS_DOM_DEPTH_EXCEEDED',
           vscode.DiagnosticSeverity.Error
         )
       );
@@ -418,6 +522,74 @@ export function activate(context: vscode.ExtensionContext) {
           `Too many font preloads (${preloadFontMatches.length}). Limit preloaded fonts to critical subsets.`,
           'PERF_FONT_PRELOAD_EXCESS',
           vscode.DiagnosticSeverity.Information
+        )
+      );
+    }
+
+    // WRS: JavaScript bundle size estimation via import analysis
+    // Database of common heavy libraries (sizes in KB, uncompressed)
+    const heavyLibraries: Record<string, { size: number; alternative?: string }> = {
+      'moment': { size: 67, alternative: 'date-fns (2KB)' },
+      'moment-timezone': { size: 190, alternative: 'date-fns-tz (11KB)' },
+      'lodash': { size: 72, alternative: 'lodash-es + tree-shaking' },
+      'jquery': { size: 87, alternative: 'vanilla JS or cash-dom (6KB)' },
+      '@material-ui/core': { size: 350, alternative: '@mui/material with tree-shaking' },
+      'rxjs': { size: 166, alternative: 'rxjs + specific operators only' },
+      'xlsx': { size: 800, alternative: 'xlsx-populate (smaller)' },
+      'chart.js': { size: 150, alternative: 'chartist (10KB)' },
+      'three': { size: 580, alternative: 'three + tree-shaking' },
+      'd3': { size: 250, alternative: 'd3 + specific modules only' }
+    };
+
+    // Match import statements (ES6 and CommonJS)
+    const importRegex = /import\s+.*?\s+from\s+['"]([^'"]+)['"]|require\s*\(\s*['"]([^'"]+)['"]\s*\)/g;
+    let totalEstimatedBundleSize = 0;
+    let importMatch;
+
+    while ((importMatch = importRegex.exec(text)) !== null) {
+      const importPath = importMatch[1] || importMatch[2];
+      // Extract package name (handle scoped packages)
+      const packageName = importPath.startsWith('@')
+        ? importPath.split('/').slice(0, 2).join('/')
+        : importPath.split('/')[0];
+
+      if (heavyLibraries[packageName]) {
+        const lib = heavyLibraries[packageName];
+        totalEstimatedBundleSize += lib.size;
+
+        const start = doc.positionAt(importMatch.index);
+        const end = doc.positionAt(importMatch.index + importMatch[0].length);
+        const range = new vscode.Range(start, end);
+
+        diagnostics.push(
+          buildDiagnostic(
+            range,
+            `Heavy dependency: ${packageName} (~${lib.size}KB). ${lib.alternative ? `Consider ${lib.alternative}` : 'Use tree-shaking or code splitting.'}`,
+            'WRS_HEAVY_DEPENDENCY',
+            vscode.DiagnosticSeverity.Information
+          )
+        );
+      }
+    }
+
+    // Warn if estimated bundle size is large
+    if (totalEstimatedBundleSize > 500) {
+      diagnostics.push(
+        buildDiagnostic(
+          new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1)),
+          `Estimated JS bundle size: ~${totalEstimatedBundleSize}KB from heavy dependencies. Google WRS recommends < 1MB total. Consider code splitting.`,
+          'WRS_JS_BUNDLE_SIZE_WARNING',
+          vscode.DiagnosticSeverity.Warning
+        )
+      );
+    }
+    if (totalEstimatedBundleSize > 1000) {
+      diagnostics.push(
+        buildDiagnostic(
+          new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1)),
+          `Estimated JS bundle size: ~${totalEstimatedBundleSize}KB - exceeds Google WRS 1MB recommendation. This will impact crawl budget and rendering.`,
+          'WRS_JS_BUNDLE_SIZE_EXCEEDED',
+          vscode.DiagnosticSeverity.Error
         )
       );
     }
