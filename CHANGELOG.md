@@ -2,6 +2,58 @@
 
 All notable changes to the Kanmi Levers Guard extension will be documented in this file.
 
+## [0.2.1] - 2025-10-04
+
+### 🎯 **Major: Context-Aware Rule System**
+
+**Fixed the core issue:** Extension no longer treats every file like an HTML file!
+
+**Before:** Applied HTML `<head>` rules to all files (JSX, TSX, JS) causing irrelevant warnings.
+**After:** Smart detection applies appropriate rules based on file type and framework.
+
+#### Context Detection & Rule Application
+
+**HTML Files (`.html`):**
+- ✅ Traditional `<head>`, `<title>`, `<meta>` validation
+- ✅ Head element ordering checks
+- ✅ Canonical link validation
+
+**Next.js Files (with `next/head` imports):**
+- ✅ `<Head>` component validation
+- ✅ Next.js-specific error codes (`SEO_NEXTJS_*`)
+- ✅ Framework-appropriate suggestions
+
+**React Files (with Helmet):**
+- ✅ `<Helmet>` component validation
+- ✅ React-specific error codes (`SEO_HELMET_*`)
+
+**Pure JS/React Components:**
+- ✅ Bundle size & performance warnings only
+- ❌ No irrelevant head/SEO warnings
+
+### Added
+
+- **Extension Icon** - Professional shield-style icon with SEO/performance indicators
+- **New Error Codes:**
+  - `SEO_NEXTJS_TITLE_MISSING` - Missing title in Next.js `<Head>`
+  - `SEO_NEXTJS_META_DESC_MISSING` - Missing meta description in Next.js `<Head>`
+  - `SEO_NEXTJS_CANONICAL_MISSING` - Missing canonical in Next.js `<Head>`
+  - `SEO_HELMET_TITLE_MISSING` - Missing title in React Helmet
+
+### Fixed
+
+- **No more false positives** on pure React components
+- **Framework-appropriate suggestions** for Next.js and React files
+- **Better developer experience** with relevant rules per file type
+
+### Improved
+
+- **Developer adoption ready** - Extension now works correctly across HTML, React, and Next.js projects
+- **Cleaner codebase** - Separate rule functions for each context
+- **Backwards compatible** - Existing HTML projects work exactly as before
+
+---
+
 ## [0.2.0] - 2025-10-04
 
 ### Added - Google WRS Optimization Features 🚀

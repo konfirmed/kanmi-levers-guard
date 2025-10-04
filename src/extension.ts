@@ -108,6 +108,217 @@ export function activate(context: vscode.ExtensionContext) {
   let debounceTimer: NodeJS.Timeout | undefined;
 
   /**
+   * Context-aware HTML head rules for traditional HTML files
+   */
+  function scanHtmlHeadRules(text: string, doc: vscode.TextDocument, diagnostics: vscode.Diagnostic[], policy: Policy) {
+    const titleMatch = /<title>([\s\S]*?)<\/title>/i.exec(text);
+    const titleMin = policy.seo?.titleMin ?? 30;
+    const titleMax = policy.seo?.titleMax ?? 60;
+    
+    if (titleMatch) {
+      const title = titleMatch[1].trim();
+      const start = doc.positionAt(titleMatch.index);
+      const end = doc.positionAt(titleMatch.index + titleMatch[0].length);
+      const range = new vscode.Range(start, end);
+      if (!within(title.length, titleMin, titleMax)) {
+        diagnostics.push(
+          buildDiagnostic(
+            range,
+            `Title length is ${title.length} characters; aim for ${titleMin}–${titleMax} characters.`,
+            'SEO_TITLE_LENGTH',
+            vscode.DiagnosticSeverity.Warning
+          )
+        );
+      }
+    } else if (/<head>/i.test(text)) {
+      const range = new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1));
+      diagnostics.push(
+        buildDiagnostic(
+          range,
+          'Missing <title>. Add a focused, query‑matching title (30–60 characters).',
+          'SEO_TITLE_MISSING',
+          vscode.DiagnosticSeverity.Warning
+        )
+      );
+    }
+
+    // Meta description for HTML
+    const metaDescMatch = /<meta\s+name=["']description["']\s+content=["']([^"']+)["'][^>]*>/i.exec(text);
+    const descMin = policy.seo?.metaDescriptionMin ?? 50;
+    const descMax = policy.seo?.metaDescriptionMax ?? 160;
+    
+    if (metaDescMatch) {
+      const desc = metaDescMatch[1].trim();
+      const start = doc.positionAt(metaDescMatch.index);
+      const end = doc.positionAt(metaDescMatch.index + metaDescMatch[0].length);
+      const range = new vscode.Range(start, end);
+      if (!within(desc.length, descMin, descMax)) {
+        diagnostics.push(
+          buildDiagnostic(
+            range,
+            `Meta description is ${desc.length} characters; aim for ${descMin}–${descMax} characters.`,
+            'SEO_META_DESC_LENGTH',
+            vscode.DiagnosticSeverity.Information
+          )
+        );
+      }
+    } else {
+      const range = new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1));
+      diagnostics.push(
+        buildDiagnostic(
+          range,
+          'Missing meta description. Add a 50–160 character description to improve click‑through rate.',
+          'SEO_META_DESC_MISSING',
+          vscode.DiagnosticSeverity.Warning
+        )
+      );
+    }
+
+    // Canonical link for HTML
+    const requireCanonical = policy.seo?.requireCanonical ?? 
+      (vscode.workspace.getConfiguration().get('kanmi.requireCanonical', true) as boolean);
+    if (requireCanonical) {
+      const canonicalMatch = /<link\s+rel=["']canonical["']\s+href=["'][^"']+["'][^>]*>/i.exec(text);
+      if (!canonicalMatch) {
+        const range = new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1));
+        diagnostics.push(
+          buildDiagnostic(
+            range,
+            'Missing canonical link. Add <link rel="canonical" href="…"> to declare a preferred URL.',
+            'SEO_CANONICAL_MISSING',
+            vscode.DiagnosticSeverity.Warning
+          )
+        );
+      }
+    }
+  }
+
+  /**
+   * Context-aware Next.js Head component rules
+   */
+  function scanNextJsHeadRules(text: string, doc: vscode.TextDocument, diagnostics: vscode.Diagnostic[], policy: Policy) {
+    const hasHeadComponent = /<Head[^>]*>/.test(text) || /<head_[a-zA-Z0-9]+\.default[^>]*>/.test(text);
+    if (!hasHeadComponent) return;
+
+    // Extract content within <Head> or <head_1.default> tags
+    const headContentRegex = /<Head[^>]*>([\s\S]*?)<\/Head>|<head_[a-zA-Z0-9]+\.default[^>]*>([\s\S]*?)<\/head_[a-zA-Z0-9]+\.default>/i;
+    const headContentMatch = headContentRegex.exec(text);
+    const headContent = headContentMatch ? (headContentMatch[1] || headContentMatch[2]) : '';
+
+    // Check for title in Next.js Head
+    const titleMatch = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(headContent);
+    const titleMin = policy.seo?.titleMin ?? 30;
+    const titleMax = policy.seo?.titleMax ?? 60;
+
+    if (titleMatch) {
+      const title = titleMatch[1].trim();
+      const actualIndex = headContentMatch!.index + headContentMatch![0].indexOf(titleMatch[0]);
+      const start = doc.positionAt(actualIndex);
+      const end = doc.positionAt(actualIndex + titleMatch[0].length);
+      const range = new vscode.Range(start, end);
+      if (!within(title.length, titleMin, titleMax)) {
+        diagnostics.push(
+          buildDiagnostic(
+            range,
+            `Next.js title length is ${title.length} characters; aim for ${titleMin}–${titleMax} characters.`,
+            'SEO_NEXTJS_TITLE_LENGTH',
+            vscode.DiagnosticSeverity.Warning
+          )
+        );
+      }
+    } else {
+      const range = new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1));
+      diagnostics.push(
+        buildDiagnostic(
+          range,
+          'Missing <title> in Next.js <Head>. Add a focused title for SEO.',
+          'SEO_NEXTJS_TITLE_MISSING',
+          vscode.DiagnosticSeverity.Warning
+        )
+      );
+    }
+
+    // Check for meta description in Next.js Head
+    const metaDescMatch = /<meta\s+name=["']description["']\s+content=["']([^"']+)["'][^>]*>/i.exec(headContent);
+    const descMin = policy.seo?.metaDescriptionMin ?? 50;
+    const descMax = policy.seo?.metaDescriptionMax ?? 160;
+
+    if (metaDescMatch) {
+      const desc = metaDescMatch[1].trim();
+      const actualIndex = headContentMatch!.index + headContentMatch![0].indexOf(metaDescMatch[0]);
+      const start = doc.positionAt(actualIndex);
+      const end = doc.positionAt(actualIndex + metaDescMatch[0].length);
+      const range = new vscode.Range(start, end);
+      if (!within(desc.length, descMin, descMax)) {
+        diagnostics.push(
+          buildDiagnostic(
+            range,
+            `Next.js meta description is ${desc.length} characters; aim for ${descMin}–${descMax} characters.`,
+            'SEO_NEXTJS_META_DESC_LENGTH',
+            vscode.DiagnosticSeverity.Information
+          )
+        );
+      }
+    } else {
+      const range = new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1));
+      diagnostics.push(
+        buildDiagnostic(
+          range,
+          'Missing meta description in Next.js <Head>. Add a 50–160 character description.',
+          'SEO_NEXTJS_META_DESC_MISSING',
+          vscode.DiagnosticSeverity.Warning
+        )
+      );
+    }
+
+    // Check for canonical link in Next.js Head
+    const requireCanonical = policy.seo?.requireCanonical ?? 
+      (vscode.workspace.getConfiguration().get('kanmi.requireCanonical', true) as boolean);
+    if (requireCanonical) {
+      const canonicalMatch = /<link\s+rel=["']canonical["']\s+href=["'][^"']+["'][^>]*>/i.exec(headContent);
+      if (!canonicalMatch) {
+        const range = new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1));
+        diagnostics.push(
+          buildDiagnostic(
+            range,
+            'Missing canonical link in Next.js <Head>. Add <link rel="canonical" href="…"> for SEO.',
+            'SEO_NEXTJS_CANONICAL_MISSING',
+            vscode.DiagnosticSeverity.Warning
+          )
+        );
+      }
+    }
+  }
+
+  /**
+   * Context-aware React Helmet rules
+   */
+  function scanReactHelmetRules(text: string, doc: vscode.TextDocument, diagnostics: vscode.Diagnostic[], policy: Policy) {
+    const hasHelmet = /<Helmet[^>]*>/.test(text) || text.includes('react-helmet');
+    if (!hasHelmet) return;
+
+    // Similar logic to Next.js but for Helmet component
+    const helmetContentRegex = /<Helmet[^>]*>([\s\S]*?)<\/Helmet>/i;
+    const helmetMatch = helmetContentRegex.exec(text);
+    if (!helmetMatch) return;
+
+    const helmetContent = helmetMatch[1];
+    const titleMatch = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(helmetContent);
+    
+    if (!titleMatch) {
+      const range = new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1));
+      diagnostics.push(
+        buildDiagnostic(
+          range,
+          'Missing <title> in React Helmet. Add a title for SEO.',
+          'SEO_HELMET_TITLE_MISSING',
+          vscode.DiagnosticSeverity.Warning
+        )
+      );
+    }
+  }
+
+  /**
    * Scan a single document for SEO and performance issues.
    */
   async function scanDocument(doc: vscode.TextDocument) {
@@ -127,12 +338,28 @@ export function activate(context: vscode.ExtensionContext) {
     const diagnostics: vscode.Diagnostic[] = [];
     const policy = readPolicy();
 
-    // FRAMEWORK DETECTION: Detect Next.js/React to avoid false positives
+    // CONTEXT DETECTION: Determine file type and framework
+    const fileExt = doc.fileName.split('.').pop()?.toLowerCase();
+    const isHtmlFile = fileExt === 'html';
+    const isJsxFile = /\.(jsx|tsx)$/.test(doc.fileName);
+    const isJsFile = /\.(js|ts)$/.test(doc.fileName);
+    
     const isNextJs = text.includes('next/head') || text.includes('from "next"') || text.includes("from 'next'");
     const isReact = text.includes('import React') || text.includes('from "react"') || text.includes("from 'react'");
-    const isJsxFile = /\.(jsx|tsx)$/.test(doc.fileName);
+    const hasHelmet = text.includes('react-helmet') || /<Helmet/.test(text);
 
-    /** SEO rules */
+    // CONTEXT-AWARE RULE APPLICATION
+    if (isHtmlFile) {
+      // Traditional HTML file - apply all HTML rules
+      scanHtmlHeadRules(text, doc, diagnostics, policy);
+    } else if (isNextJs && (isJsxFile || isJsFile)) {
+      // Next.js React component - apply Next.js specific rules
+      scanNextJsHeadRules(text, doc, diagnostics, policy);
+    } else if (hasHelmet && (isJsxFile || isJsFile)) {
+      // React component with Helmet - apply Helmet specific rules
+      scanReactHelmetRules(text, doc, diagnostics, policy);
+    }
+    // For pure JS/TS/JSX files without head management, skip head-related rules    /** SEO rules */
     // Title tag: ensure it exists and length is in a reasonable range.
     const titleMatch = /<title>([\s\S]*?)<\/title>/i.exec(text);
     const titleMin = policy.seo?.titleMin ?? 30;
@@ -168,59 +395,13 @@ export function activate(context: vscode.ExtensionContext) {
       }
     }
 
-    // Meta description: ensure it exists and has reasonable length.
-    const metaDescMatch = /<meta\s+name=["']description["']\s+content=["']([^"']+)["'][^>]*>/i.exec(text);
-    const descMin = policy.seo?.metaDescriptionMin ?? 50;
-    const descMax = policy.seo?.metaDescriptionMax ?? 160;
-    if (metaDescMatch) {
-      const desc = metaDescMatch[1].trim();
-      const start = doc.positionAt(metaDescMatch.index);
-      const end = doc.positionAt(metaDescMatch.index + metaDescMatch[0].length);
-      const range = new vscode.Range(start, end);
-      if (!within(desc.length, descMin, descMax)) {
-        diagnostics.push(
-          buildDiagnostic(
-            range,
-            `Meta description is ${desc.length} characters; aim for ${descMin}–${descMax} characters.`,
-            'SEO_META_DESC_LENGTH',
-            vscode.DiagnosticSeverity.Information
-          )
-        );
-      }
-    } else {
-      const range = new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1));
-      diagnostics.push(
-        buildDiagnostic(
-          range,
-          'Missing meta description. Add a 50–160 character description to improve click‑through rate.',
-          'SEO_META_DESC_MISSING',
-          vscode.DiagnosticSeverity.Warning
-        )
-      );
-    }
+    // Note: Meta description and canonical rules are now handled by context-aware functions above
 
-    // Canonical link: warn if missing when configured.
-    const requireCanonical =
-      policy.seo?.requireCanonical ??
-      (vscode.workspace.getConfiguration().get('kanmi.requireCanonical', true) as boolean);
-    if (requireCanonical) {
-      const canonicalMatch = /<link\s+rel=["']canonical["']\s+href=["'][^"']+["'][^>]*>/i.exec(text);
-      if (!canonicalMatch) {
-        const range = new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1));
-        diagnostics.push(
-          buildDiagnostic(
-            range,
-            'Missing canonical link. Add <link rel="canonical" href="…"> to declare a preferred URL.',
-            'SEO_CANONICAL_MISSING',
-            vscode.DiagnosticSeverity.Warning
-          )
-        );
-      }
-    }
-
+    // UNIVERSAL RULES: Apply to all file types when relevant
+    
     // JSON‑LD hints: suggest adding product/article structured data when relevant keywords are present.
     const requireTypes = policy.seo?.requireJsonLdFor ?? [];
-    if (requireTypes.length) {
+    if (requireTypes.length && (isHtmlFile || isNextJs || isReact)) {
       const hasJsonLd = /<script\s+type=["']application\/ld\+json["']>/.test(text);
       const fileLower = doc.fileName.toLowerCase();
       const isProductLike =
@@ -251,22 +432,25 @@ export function activate(context: vscode.ExtensionContext) {
     }
 
     // Open Graph validation (Web Almanac 2024: 53-61% of pages use OG tags)
-    const ogTags = {
-      'og:title': /<meta\s+property=["']og:title["']\s+content=["'][^"']+["'][^>]*>/i.test(text),
-      'og:description': /<meta\s+property=["']og:description["']\s+content=["'][^"']+["'][^>]*>/i.test(text),
-      'og:image': /<meta\s+property=["']og:image["']\s+content=["'][^"']+["'][^>]*>/i.test(text),
-      'og:url': /<meta\s+property=["']og:url["']\s+content=["'][^"']+["'][^>]*>/i.test(text)
-    };
-    const missingOg = Object.entries(ogTags).filter(([_, present]) => !present).map(([tag]) => tag);
-    if (missingOg.length >= 3 && /<head>/i.test(text)) {
-      diagnostics.push(
-        buildDiagnostic(
-          new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1)),
-          `Missing ${missingOg.length}/4 Open Graph tags: ${missingOg.join(', ')}. These improve social media sharing.`,
-          'SEO_OG_TAGS_MISSING',
-          vscode.DiagnosticSeverity.Information
-        )
-      );
+    // Only check for pages that should have social sharing (HTML files or pages with head management)
+    if (isHtmlFile || isNextJs || hasHelmet) {
+      const ogTags = {
+        'og:title': /<meta\s+property=["']og:title["']\s+content=["'][^"']+["'][^>]*>/i.test(text),
+        'og:description': /<meta\s+property=["']og:description["']\s+content=["'][^"']+["'][^>]*>/i.test(text),
+        'og:image': /<meta\s+property=["']og:image["']\s+content=["'][^"']+["'][^>]*>/i.test(text),
+        'og:url': /<meta\s+property=["']og:url["']\s+content=["'][^"']+["'][^>]*>/i.test(text)
+      };
+      const missingOg = Object.entries(ogTags).filter(([_, present]) => !present).map(([tag]) => tag);
+      if (missingOg.length >= 3) {
+        diagnostics.push(
+          buildDiagnostic(
+            new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1)),
+            `Missing ${missingOg.length}/4 Open Graph tags: ${missingOg.join(', ')}. These improve social media sharing.`,
+            'SEO_OG_TAGS_MISSING',
+            vscode.DiagnosticSeverity.Information
+          )
+        );
+      }
     }
 
     // HTML size estimation (warn if >100KB)
@@ -360,55 +544,57 @@ export function activate(context: vscode.ExtensionContext) {
       );
     }
 
-    // Head element ordering checks (based on KanmiSEO analyzer.py patterns)
-    const headMatch = /<head[^>]*>([\s\S]*?)<\/head>/i.exec(text);
-    if (headMatch) {
-      const headContent = headMatch[1];
-      const headStart = headMatch.index + headMatch[0].indexOf('>') + 1;
+    // Head element ordering checks (only for HTML files)
+    if (isHtmlFile) {
+      const headMatch = /<head[^>]*>([\s\S]*?)<\/head>/i.exec(text);
+      if (headMatch) {
+        const headContent = headMatch[1];
+        const headStart = headMatch.index + headMatch[0].indexOf('>') + 1;
 
-      // Extract positions of key elements in head
-      const charsetMatch = /<meta\s+charset=/i.exec(headContent);
-      const titleMatchPos = /<title>/i.exec(headContent);
-      const firstStyleMatch = /<link\s+[^>]*rel=["']stylesheet["']/i.exec(headContent);
-      const firstScriptMatch = /<script[^>]*>/i.exec(headContent);
+        // Extract positions of key elements in head
+        const charsetMatch = /<meta\s+charset=/i.exec(headContent);
+        const titleMatchPos = /<title>/i.exec(headContent);
+        const firstStyleMatch = /<link\s+[^>]*rel=["']stylesheet["']/i.exec(headContent);
+        const firstScriptMatch = /<script[^>]*>/i.exec(headContent);
 
-      // Charset should be first
-      if (charsetMatch && charsetMatch.index > 100) {
-        const charsetPos = doc.positionAt(headStart + charsetMatch.index);
-        diagnostics.push(
-          buildDiagnostic(
-            new vscode.Range(charsetPos, charsetPos),
-            '<meta charset> should be the first element in <head> to prevent re-parsing.',
-            'SEO_CHARSET_ORDERING',
-            vscode.DiagnosticSeverity.Warning
-          )
-        );
-      }
+        // Charset should be first
+        if (charsetMatch && charsetMatch.index > 100) {
+          const charsetPos = doc.positionAt(headStart + charsetMatch.index);
+          diagnostics.push(
+            buildDiagnostic(
+              new vscode.Range(charsetPos, charsetPos),
+              '<meta charset> should be the first element in <head> to prevent re-parsing.',
+              'SEO_CHARSET_ORDERING',
+              vscode.DiagnosticSeverity.Warning
+            )
+          );
+        }
 
-      // Title should come before stylesheets
-      if (titleMatchPos && firstStyleMatch && titleMatchPos.index > firstStyleMatch.index) {
-        const titlePos = doc.positionAt(headStart + titleMatchPos.index);
-        diagnostics.push(
-          buildDiagnostic(
-            new vscode.Range(titlePos, titlePos),
-            '<title> should appear before stylesheets for faster discovery by search engines.',
-            'SEO_TITLE_ORDERING',
-            vscode.DiagnosticSeverity.Information
-          )
-        );
-      }
+        // Title should come before stylesheets
+        if (titleMatchPos && firstStyleMatch && titleMatchPos.index > firstStyleMatch.index) {
+          const titlePos = doc.positionAt(headStart + titleMatchPos.index);
+          diagnostics.push(
+            buildDiagnostic(
+              new vscode.Range(titlePos, titlePos),
+              '<title> should appear before stylesheets for faster discovery by search engines.',
+              'SEO_TITLE_ORDERING',
+              vscode.DiagnosticSeverity.Information
+            )
+          );
+        }
 
-      // Title should come before blocking scripts
-      if (titleMatchPos && firstScriptMatch && titleMatchPos.index > firstScriptMatch.index) {
-        const titlePos = doc.positionAt(headStart + titleMatchPos.index);
-        diagnostics.push(
-          buildDiagnostic(
-            new vscode.Range(titlePos, titlePos),
-            '<title> should appear before blocking scripts to avoid crawl delays.',
-            'SEO_TITLE_SCRIPT_ORDERING',
-            vscode.DiagnosticSeverity.Information
-          )
-        );
+        // Title should come before blocking scripts
+        if (titleMatchPos && firstScriptMatch && titleMatchPos.index > firstScriptMatch.index) {
+          const titlePos = doc.positionAt(headStart + titleMatchPos.index);
+          diagnostics.push(
+            buildDiagnostic(
+              new vscode.Range(titlePos, titlePos),
+              '<title> should appear before blocking scripts to avoid crawl delays.',
+              'SEO_TITLE_SCRIPT_ORDERING',
+              vscode.DiagnosticSeverity.Information
+            )
+          );
+        }
       }
     }
 

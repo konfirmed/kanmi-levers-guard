@@ -1,0 +1,22 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background circle -->
+  <circle cx="64" cy="64" r="60" fill="#2D5AA0" stroke="#1E3A8A" stroke-width="4"/>
+  
+  <!-- Shield shape for "Guard" concept -->
+  <path d="M64 20 L90 35 L90 75 Q90 85 64 100 Q38 85 38 75 L38 35 Z" fill="#60A5FA" stroke="#1E40AF" stroke-width="2"/>
+  
+  <!-- SEO/Performance indicators -->
+  <!-- Check mark -->
+  <path d="M52 65 L60 73 L78 50" stroke="#10B981" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  
+  <!-- Meta tag symbol -->
+  <rect x="48" y="40" width="32" height="6" rx="2" fill="#F3F4F6"/>
+  <rect x="48" y="50" width="24" height="4" rx="1" fill="#E5E7EB"/>
+  
+  <!-- Performance graph/chart indicator -->
+  <path d="M45 85 L55 80 L65 82 L75 75 L85 78" stroke="#F59E0B" stroke-width="2" stroke-linecap="round" fill="none"/>
+  
+  <!-- Small dots for decoration -->
+  <circle cx="50" cy="32" r="1.5" fill="#FBBF24"/>
+  <circle cx="78" cy="32" r="1.5" fill="#FBBF24"/>
+</svg>
