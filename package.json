@@ -2,20 +2,20 @@
   "name": "kanmi-levers-guard",
   "displayName": "Kanmi Levers Guard",
   "description": "Catch SEO & performance issues while you code. Real-time diagnostics for meta tags, blocking resources, image optimization, and more.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "kanmiobasa",
   "author": {
     "name": "Kanmi Obasa",
-    "email": "kanmi@konfirmed.com"
+    "email": "i@kanmiobasa.com"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/kanmiobasa/obasa"
+    "url": "https://github.com/konfirmed/kanmi-levers-guard"
   },
-  "homepage": "https://kanmiobasa.com",
+  "homepage": "https://kanmiobasa.com/labs/kanmi-levers-guard",
   "bugs": {
-    "url": "https://github.com/kanmiobasa/obasa/issues",
-    "email": "kanmi@konfirmed.com"
+    "url": "https://github.com/konfirmed/kanmi-levers-guard/issues",
+    "email": "i@kanmiobasa.com"
   },
   "keywords": [
     "seo",

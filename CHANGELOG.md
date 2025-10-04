@@ -132,6 +132,6 @@ No breaking changes. Extension will automatically:
 ## Links
 
 - **Marketplace**: https://marketplace.visualstudio.com/items?itemName=kanmiobasa.kanmi-levers-guard
-- **GitHub**: https://github.com/kanmiobasa/obasa/tree/main/KanmiLabs/extensions/kanmi-levers-guard
-- **Issues**: https://github.com/kanmiobasa/obasa/issues
+- **GitHub**: https://github.com/konfirmed/kanmi-levers-guard
+- **Issues**: https://github.com/konfirmed/kanmi-levers-guard/issues
 - **Full Suite**: https://kanmiobasa.com/labs

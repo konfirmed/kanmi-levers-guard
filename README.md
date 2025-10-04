@@ -230,7 +230,7 @@ Kanmi Levers Guard is a **static analyzer** — it reads your code but doesn't r
 
 ## Contributing
 
-Found a bug or have a feature request? Open an issue in the [main KanmiLabs repo](https://github.com/yourusername/kanmilabs).
+Found a bug or have a feature request? Open an issue on [GitHub](https://github.com/konfirmed/kanmi-levers-guard/issues).
 
 ## Research & Standards
 
