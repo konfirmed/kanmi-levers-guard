@@ -1,0 +1,24 @@
+{
+  "compilerOptions": {
+    "module": "commonjs",
+    "target": "ES2020",
+    "outDir": "out",
+    "lib": ["ES2020"],
+    "sourceMap": true,
+    "rootDir": "src",
+    "strict": true,
+    // Resolve the vscode module from the workspace root so that TypeScript can find it.
+    "paths": {
+      "vscode": ["../node_modules/vscode"]
+    },
+    // Skip type checking of declaration files from dependencies; our extension does not depend on DOM lib types.
+    "skipLibCheck": true
+  },
+  "exclude": [
+    "node_modules",
+    ".vscode-test",
+    "test-*.html",
+    "test-*.tsx",
+    "TEST_RESULTS.md"
+  ]
+}

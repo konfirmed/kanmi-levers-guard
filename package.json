@@ -1,0 +1,86 @@
+{
+  "name": "kanmi-levers-guard",
+  "displayName": "Kanmi Levers Guard",
+  "description": "Catch SEO & performance issues while you code. Real-time diagnostics for meta tags, blocking resources, image optimization, and more.",
+  "version": "0.1.1",
+  "publisher": "kanmiobasa",
+  "author": {
+    "name": "Kanmi Obasa",
+    "email": "kanmi@konfirmed.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/kanmiobasa/obasa"
+  },
+  "homepage": "https://kanmiobasa.com",
+  "bugs": {
+    "url": "https://github.com/kanmiobasa/obasa/issues",
+    "email": "kanmi@konfirmed.com"
+  },
+  "keywords": [
+    "seo",
+    "performance",
+    "web vitals",
+    "core web vitals",
+    "linter",
+    "next.js",
+    "react",
+    "html",
+    "accessibility",
+    "open graph",
+    "meta tags"
+  ],
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Linters",
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:kanmi.scan"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "kanmi.scan",
+        "title": "Kanmi: Scan Workspace"
+      }
+    ],
+    "configuration": {
+      "type": "object",
+      "title": "Kanmi Levers Guard",
+      "properties": {
+        "kanmi.maxThirdPartyScriptsPerPage": {
+          "type": "number",
+          "default": 6,
+          "description": "Warn if a page imports more third‑party scripts than this."
+        },
+        "kanmi.lcpImageKB": {
+          "type": "number",
+          "default": 350,
+          "description": "Target maximum size for likely LCP images (in kilobytes)."
+        },
+        "kanmi.requireCanonical": {
+          "type": "boolean",
+          "default": true,
+          "description": "If true, require a canonical link in each HTML/JSX document."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "tsc -p ./",
+    "compile": "tsc -watch -p ./",
+    "build": "tsc -p ./",
+    "package": "npx vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^24.6.2",
+    "typescript": "^5.4.0",
+    "vsce": "^2.15.0",
+    "vscode": "^1.1.37"
+  }
+}

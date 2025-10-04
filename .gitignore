@@ -1,0 +1,57 @@
+# Node.js dependencies
+node_modules/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build output
+dist/
+out/
+build/
+lib/
+
+# VS Code settings and test folders
+.vscode/
+.vscode-test/
+
+# TypeScript
+*.tsbuildinfo
+
+# Coverage
+coverage/
+.nyc_output/
+
+# Environment files
+.env
+.env.*.local
+
+# macOS
+.DS_Store
+
+# Editor/IDE folders
+.idea/
+.vscode/
+.history/
+.cache/
+
+# Visual Studio
+.vs/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Swap/temp files
+*~
+*.swp
+*.swo
+
+# Optional: ignore packaged extension artifacts (uncomment if you want .vsix files ignored)
+*.vsix
+
+# If you ever add lockfiles or other package manager files you don't want tracked, add them here.

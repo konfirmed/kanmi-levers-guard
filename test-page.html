@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Test</title>
+  <script src="https://cdn.example.com/analytics.js"></script>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Roboto">
+  <style>
+    @font-face {
+      font-family: 'CustomFont';
+      src: url('/fonts/custom.woff2');
+    }
+  </style>
+</head>
+<body>
+  <h1>Testing Kanmi Levers Guard</h1>
+
+  <!-- Missing alt, width, height -->
+  <img src="/hero.jpg">
+
+  <!-- Multiple third-party scripts (should trigger warning) -->
+  <script src="https://cdn1.example.com/script1.js"></script>
+  <script src="https://cdn2.example.com/script2.js"></script>
+  <script src="https://cdn3.example.com/script3.js"></script>
+  <script src="https://cdn4.example.com/script4.js"></script>
+  <script src="https://cdn5.example.com/script5.js"></script>
+  <script src="https://cdn6.example.com/script6.js"></script>
+  <script src="https://cdn7.example.com/script7.js"></script>
+</body>
+</html>
