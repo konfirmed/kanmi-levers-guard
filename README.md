@@ -1,8 +1,20 @@
 # Kanmi Levers Guard
 
+![Version](https://img.shields.io/visual-studio-marketplace/v/kanmiobasa.kanmi-levers-guard?color=blue)
+![Installs](https://img.shields.io/visual-studio-marketplace/i/kanmiobasa.kanmi-levers-guard?color=brightgreen)
+![Rating](https://img.shields.io/visual-studio-marketplace/r/kanmiobasa.kanmi-levers-guard)
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+
 **Catch SEO & performance issues while you code.**
 
 A VSCode extension that provides instant, real-time feedback on SEO and performance best practices directly in your editor. No build step required, no configuration needed — just install and start coding better.
+
+## TL;DR
+
+✅ Detect missing meta tags, bad scripts, and oversized images
+⚡ Instantly see SEO & performance warnings in your editor
+🧩 Works with HTML, React, Next.js, and TypeScript
+📊 Based on Google's Web Rendering Service & Core Web Vitals
 
 ## Features
 
@@ -209,6 +221,14 @@ Kanmi Levers Guard is the **first line of defense** in the KanmiLabs performance
   priority // For LCP images
 />
 ```
+
+## Kanmi Levers Guard vs Lighthouse vs ESLint
+
+| Tool | Runs Where | Real-time | SEO Checks | Core Web Vitals | Code Fixes |
+|------|-------------|-----------|-------------|-----------------|-------------|
+| Lighthouse | Browser / CI | ❌ | ✅ | ✅ | ❌ |
+| ESLint | Editor / CI | ✅ | ❌ | ❌ | ✅ |
+| **Kanmi Levers Guard** | **VS Code (Editor)** | **✅** | **✅** | **✅** | **✅ (coming soon)** |
 
 ## Why Static Analysis Matters
 

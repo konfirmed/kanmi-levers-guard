@@ -1,6 +1,6 @@
 {
   "name": "kanmi-levers-guard",
-  "displayName": "Kanmi Levers Guard",
+  "displayName": "Kanmi Levers Guard - SEO & Performance Linter",
   "description": "Catch SEO & performance issues while you code. Real-time diagnostics for meta tags, blocking resources, image optimization, and more.",
   "version": "0.2.1",
   "publisher": "kanmiobasa",
@@ -20,15 +20,14 @@
   "keywords": [
     "seo",
     "performance",
-    "web vitals",
     "core web vitals",
-    "linter",
+    "lighthouse",
+    "web performance",
+    "page speed",
     "next.js",
-    "react",
     "html",
-    "accessibility",
-    "open graph",
-    "meta tags"
+    "react",
+    "static analysis"
   ],
   "engines": {
     "vscode": "^1.85.0"
