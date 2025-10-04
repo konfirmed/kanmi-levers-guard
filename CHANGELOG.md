@@ -2,6 +2,19 @@
 
 All notable changes to the Kanmi Levers Guard extension will be documented in this file.
 
+## [0.2.2] - 2025-10-04
+
+### Changed - Marketplace SEO Optimization
+
+**Improved Discoverability:**
+- ✅ Updated displayName to "Kanmi Levers Guard - SEO & Performance Linter"
+- ✅ Enhanced keywords: lighthouse, web performance, page speed, static analysis
+- ✅ Optimized README with TL;DR, badges, and comparison table
+
+**No functional changes** - Metadata update for better marketplace ranking.
+
+---
+
 ## [0.2.1] - 2025-10-04
 
 ### 🎯 **Major: Context-Aware Rule System**
