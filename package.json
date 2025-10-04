@@ -2,7 +2,7 @@
   "name": "kanmi-levers-guard",
   "displayName": "Kanmi Levers Guard - SEO & Performance Linter",
   "description": "Catch SEO & performance issues while you code. Real-time diagnostics for meta tags, blocking resources, image optimization, and more.",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "publisher": "kanmiobasa",
   "author": {
     "name": "Kanmi Obasa",
