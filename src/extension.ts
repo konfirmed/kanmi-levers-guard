@@ -20,7 +20,9 @@ interface Policy {
     maxThirdPartyScriptsPerPage?: number;
     lcpImageKB?: number;
     requireFontDisplaySwap?: boolean;
+    requireImageLazyLoading?: boolean;
   };
+  disabledRules?: string[];
 }
 
 /**
@@ -53,6 +55,24 @@ function buildDiagnostic(
   diag.code = code;
   diag.source = 'Kanmi';
   return diag;
+}
+
+/**
+ * Helper to add a diagnostic to the array if the rule is not disabled.
+ */
+function addDiagnostic(
+  diagnostics: vscode.Diagnostic[],
+  range: vscode.Range,
+  message: string,
+  code: string,
+  severity: vscode.DiagnosticSeverity,
+  policy: Policy
+): void {
+  // Skip if this rule is disabled
+  if (policy?.disabledRules?.includes(code)) {
+    return;
+  }
+  diagnostics.push(buildDiagnostic(range, message, code, severity));
 }
 
 /**
@@ -212,6 +232,14 @@ export function activate(context: vscode.ExtensionContext) {
 
     if (titleMatch) {
       const title = titleMatch[1].trim();
+
+      // Skip validation if title contains JSX expressions (dynamic content)
+      const hasJsxExpression = /\{[\s\S]*?\}/.test(title);
+      if (hasJsxExpression) {
+        // Title is dynamic - we can't validate its length statically
+        return;
+      }
+
       const actualIndex = headContentMatch!.index + headContentMatch![0].indexOf(titleMatch[0]);
       const start = doc.positionAt(actualIndex);
       const end = doc.positionAt(actualIndex + titleMatch[0].length);
@@ -239,25 +267,33 @@ export function activate(context: vscode.ExtensionContext) {
     }
 
     // Check for meta description in Next.js Head
-    const metaDescMatch = /<meta\s+name=["']description["']\s+content=["']([^"']+)["'][^>]*>/i.exec(headContent);
+    // Support both string literals and JSX expressions: content="..." or content={...}
+    const metaDescMatch = /<meta\s+name=["']description["']\s+content=(?:["']([^"']+)["']|\{[^}]*\})[^>]*>/i.exec(headContent);
     const descMin = policy.seo?.metaDescriptionMin ?? 50;
     const descMax = policy.seo?.metaDescriptionMax ?? 160;
 
     if (metaDescMatch) {
-      const desc = metaDescMatch[1].trim();
-      const actualIndex = headContentMatch!.index + headContentMatch![0].indexOf(metaDescMatch[0]);
-      const start = doc.positionAt(actualIndex);
-      const end = doc.positionAt(actualIndex + metaDescMatch[0].length);
-      const range = new vscode.Range(start, end);
-      if (!within(desc.length, descMin, descMax)) {
-        diagnostics.push(
-          buildDiagnostic(
-            range,
-            `Next.js meta description is ${desc.length} characters; aim for ${descMin}–${descMax} characters.`,
-            'SEO_NEXTJS_META_DESC_LENGTH',
-            vscode.DiagnosticSeverity.Information
-          )
-        );
+      const desc = metaDescMatch[1]?.trim();
+
+      // Skip validation if description is a JSX expression (dynamic content)
+      if (!desc) {
+        // Description is dynamic (content={...}), skip validation
+        // Continue to check other rules
+      } else {
+        const actualIndex = headContentMatch!.index + headContentMatch![0].indexOf(metaDescMatch[0]);
+        const start = doc.positionAt(actualIndex);
+        const end = doc.positionAt(actualIndex + metaDescMatch[0].length);
+        const range = new vscode.Range(start, end);
+        if (!within(desc.length, descMin, descMax)) {
+          diagnostics.push(
+            buildDiagnostic(
+              range,
+              `Next.js meta description is ${desc.length} characters; aim for ${descMin}–${descMax} characters.`,
+              'SEO_NEXTJS_META_DESC_LENGTH',
+              vscode.DiagnosticSeverity.Information
+            )
+          );
+        }
       }
     } else {
       const range = new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1));
@@ -304,7 +340,7 @@ export function activate(context: vscode.ExtensionContext) {
 
     const helmetContent = helmetMatch[1];
     const titleMatch = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(helmetContent);
-    
+
     if (!titleMatch) {
       const range = new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1));
       diagnostics.push(
@@ -319,11 +355,111 @@ export function activate(context: vscode.ExtensionContext) {
   }
 
   /**
+   * Context-aware Next.js App Router Metadata API rules (Next.js 13+)
+   */
+  function scanNextJsMetadataAPI(
+    text: string,
+    doc: vscode.TextDocument,
+    diagnostics: vscode.Diagnostic[],
+    policy: Policy,
+    isLayoutFile: boolean,
+    isPageFile: boolean
+  ) {
+    const hasMetadataExport = /export\s+const\s+metadata\s*[:=]/.test(text);
+    const hasGenerateMetadata = /export\s+(async\s+)?function\s+generateMetadata/.test(text);
+
+    // For page files, metadata is recommended (but can be inherited from layout)
+    // For layout files, metadata is optional (provides defaults)
+    if (isPageFile && !hasMetadataExport && !hasGenerateMetadata) {
+      // Check if there's a Head component being used (mixing patterns - not recommended)
+      const hasHeadComponent = /<Head[^>]*>/.test(text);
+      if (hasHeadComponent) {
+        const range = new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1));
+        diagnostics.push(
+          buildDiagnostic(
+            range,
+            'Using <Head> in App Router is deprecated. Use Metadata API instead: export const metadata = { title: "...", description: "..." }',
+            'SEO_NEXTJS_APPDIR_USE_METADATA_API',
+            vscode.DiagnosticSeverity.Warning
+          )
+        );
+      } else {
+        // Page file with no metadata - might be inheriting from layout (this is fine)
+        // Only warn if there's no layout above (which we can't easily detect)
+        // So we'll make this an Information-level suggestion
+        const range = new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1));
+        diagnostics.push(
+          buildDiagnostic(
+            range,
+            'Consider adding metadata export for SEO: export const metadata = { title: "...", description: "..." }',
+            'SEO_NEXTJS_METADATA_SUGGESTION',
+            vscode.DiagnosticSeverity.Information
+          )
+        );
+      }
+    }
+
+    // If metadata export exists, validate its structure
+    if (hasMetadataExport) {
+      // Extract the metadata object content
+      const metadataMatch = /export\s+const\s+metadata\s*[:=]\s*(\{[\s\S]*?\n\})/m.exec(text);
+      if (metadataMatch) {
+        const metadataContent = metadataMatch[1];
+
+        // Check for title
+        const hasTitle = /title\s*[:=]/.test(metadataContent);
+        if (!hasTitle && !isLayoutFile) {
+          const metadataPos = doc.positionAt(metadataMatch.index);
+          diagnostics.push(
+            buildDiagnostic(
+              new vscode.Range(metadataPos, metadataPos),
+              'Metadata object missing title property. Add: title: "Your page title"',
+              'SEO_NEXTJS_METADATA_TITLE_MISSING',
+              vscode.DiagnosticSeverity.Warning
+            )
+          );
+        }
+
+        // Check for description
+        const hasDescription = /description\s*[:=]/.test(metadataContent);
+        if (!hasDescription && !isLayoutFile) {
+          const metadataPos = doc.positionAt(metadataMatch.index);
+          diagnostics.push(
+            buildDiagnostic(
+              new vscode.Range(metadataPos, metadataPos),
+              'Metadata object missing description property. Add: description: "Your page description"',
+              'SEO_NEXTJS_METADATA_DESC_MISSING',
+              vscode.DiagnosticSeverity.Warning
+            )
+          );
+        }
+      }
+    }
+  }
+
+  /**
    * Scan a single document for SEO and performance issues.
    */
   async function scanDocument(doc: vscode.TextDocument) {
-    // Only process JavaScript/TypeScript/JSX/TSX/HTML files.
-    if (!/\.(jsx?|tsx?|html)$/.test(doc.fileName)) {
+    // CONTEXT DETECTION: Determine file type and framework
+    const fileExt = doc.fileName.split('.').pop()?.toLowerCase();
+    const isHtmlFile = fileExt === 'html';
+    const isJsxFile = /\.(jsx|tsx)$/.test(doc.fileName);
+    const isJsFile = /\.(js|ts)$/.test(doc.fileName);
+    const isPureTypeScript = /\.(ts|js)$/.test(doc.fileName) && !isJsxFile;
+
+    // Only process files that can have SEO/head content
+    if (!isHtmlFile && !isJsxFile && !isPureTypeScript) {
+      return;
+    }
+
+    // Skip node_modules
+    if (doc.fileName.includes('/node_modules/') || doc.fileName.includes('\\node_modules\\')) {
+      return;
+    }
+
+    // Skip the extension's own source files and compiled output
+    if (doc.fileName.includes('kanmi-levers-guard')) {
       return;
     }
 
@@ -338,64 +474,59 @@ export function activate(context: vscode.ExtensionContext) {
     const diagnostics: vscode.Diagnostic[] = [];
     const policy = readPolicy();
 
-    // CONTEXT DETECTION: Determine file type and framework
-    const fileExt = doc.fileName.split('.').pop()?.toLowerCase();
-    const isHtmlFile = fileExt === 'html';
-    const isJsxFile = /\.(jsx|tsx)$/.test(doc.fileName);
-    const isJsFile = /\.(js|ts)$/.test(doc.fileName);
-    
-    const isNextJs = text.includes('next/head') || text.includes('from "next"') || text.includes("from 'next'");
+    // Next.js App Router detection (Next.js 13+)
+    const isAppRouterFile = /[\/\\]app[\/\\]/.test(doc.fileName) &&
+                            (/page\.(tsx?|jsx?)$/.test(doc.fileName) ||
+                             /layout\.(tsx?|jsx?)$/.test(doc.fileName) ||
+                             /template\.(tsx?|jsx?)$/.test(doc.fileName));
+    const isLayoutFile = /layout\.(tsx?|jsx?)$/.test(doc.fileName);
+    const isPageFile = /page\.(tsx?|jsx?)$/.test(doc.fileName);
+
+    // Metadata API detection (App Router)
+    const hasMetadataExport = /export\s+const\s+metadata\s*[:=]/.test(text);
+    const hasGenerateMetadata = /export\s+(async\s+)?function\s+generateMetadata/.test(text);
+    const usesMetadataAPI = hasMetadataExport || hasGenerateMetadata;
+
+    // More precise Next.js detection - look for actual Next.js imports
+    const isNextJs = text.includes('next/head') ||
+                     text.includes('next/image') ||
+                     /from\s+["']next\//.test(text) ||  // Match: from "next/..." or from 'next/...'
+                     /require\s*\(\s*["']next\//.test(text) ||  // Match: require("next/...")
+                     isAppRouterFile;  // App Router files are Next.js files
     const isReact = text.includes('import React') || text.includes('from "react"') || text.includes("from 'react'");
     const hasHelmet = text.includes('react-helmet') || /<Helmet/.test(text);
+    const hasNextSeo = text.includes('next-seo') || /<NextSeo/.test(text) || text.includes('NextSeo');
+
+    // Skip pure TypeScript/JavaScript files that aren't Next.js pages/layouts
+    // These are likely utility files, types, configs, etc.
+    if (isPureTypeScript && !isAppRouterFile && !isNextJs && !isReact) {
+      return; // Skip SEO validation for non-UI TypeScript files
+    }
 
     // CONTEXT-AWARE RULE APPLICATION
     if (isHtmlFile) {
       // Traditional HTML file - apply all HTML rules
       scanHtmlHeadRules(text, doc, diagnostics, policy);
+    } else if (hasNextSeo && (isJsxFile || isJsFile)) {
+      // Next.js with next-seo package - skip head validation (next-seo handles it)
+      // next-seo provides a higher-level API that we trust
+    } else if (isAppRouterFile && usesMetadataAPI) {
+      // Next.js 13+ App Router with Metadata API - validate metadata object
+      scanNextJsMetadataAPI(text, doc, diagnostics, policy, isLayoutFile, isPageFile);
+    } else if (isAppRouterFile && !usesMetadataAPI) {
+      // App Router file without Metadata API - suggest using it
+      scanNextJsMetadataAPI(text, doc, diagnostics, policy, isLayoutFile, isPageFile);
     } else if (isNextJs && (isJsxFile || isJsFile)) {
-      // Next.js React component - apply Next.js specific rules
+      // Next.js Pages Router - apply traditional Head component rules
       scanNextJsHeadRules(text, doc, diagnostics, policy);
     } else if (hasHelmet && (isJsxFile || isJsFile)) {
       // React component with Helmet - apply Helmet specific rules
       scanReactHelmetRules(text, doc, diagnostics, policy);
     }
-    // For pure JS/TS/JSX files without head management, skip head-related rules    /** SEO rules */
-    // Title tag: ensure it exists and length is in a reasonable range.
-    const titleMatch = /<title>([\s\S]*?)<\/title>/i.exec(text);
-    const titleMin = policy.seo?.titleMin ?? 30;
-    const titleMax = policy.seo?.titleMax ?? 60;
-    if (titleMatch) {
-      const title = titleMatch[1].trim();
-      const start = doc.positionAt(titleMatch.index);
-      const end = doc.positionAt(titleMatch.index + titleMatch[0].length);
-      const range = new vscode.Range(start, end);
-      if (!within(title.length, titleMin, titleMax)) {
-        diagnostics.push(
-          buildDiagnostic(
-            range,
-            `Title length is ${title.length} characters; aim for ${titleMin}–${titleMax} characters.`,
-            'SEO_TITLE_LENGTH',
-            vscode.DiagnosticSeverity.Warning
-          )
-        );
-      }
-    } else {
-      // If no title tag is present but the file includes <head>, warn.
-      // SKIP for Next.js/React files (they use <Head> component)
-      if (/<head>/i.test(text) && !isNextJs && !isJsxFile) {
-        const range = new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1));
-        diagnostics.push(
-          buildDiagnostic(
-            range,
-            'Missing <title>. Add a focused, query‑matching title (30–60 characters).',
-            'SEO_TITLE_MISSING',
-            vscode.DiagnosticSeverity.Warning
-          )
-        );
-      }
-    }
+    // For pure JS/TS/JSX files without head management, skip head-related rules
 
-    // Note: Meta description and canonical rules are now handled by context-aware functions above
+    // Note: Title, meta description, and canonical rules are handled by context-aware functions above
+    // (scanHtmlHeadRules, scanNextJsHeadRules, scanReactHelmetRules, scanNextJsMetadataAPI)
 
     // UNIVERSAL RULES: Apply to all file types when relevant
     
@@ -497,7 +628,19 @@ export function activate(context: vscode.ExtensionContext) {
 
     // WRS: DOM size optimization (Google recommends < 1,500 elements)
     // Count opening tags (excluding self-closing and closing tags)
-    const openingTags = text.match(/<[a-zA-Z][^/>]*>/g) || [];
+    // For JSX/TSX files, we need to be more selective to avoid counting JSX components
+    let openingTags: string[] = text.match(/<[a-zA-Z][^/>]*>/g) || [];
+
+    // Filter out common false positives in JSX/TS files
+    if (isJsxFile || isJsFile) {
+      openingTags = openingTags.filter(tag => {
+        // Keep only lowercase HTML tags (DOM elements)
+        // Exclude: <MyComponent>, <Array>, etc. (capitalized = JSX components/TypeScript)
+        const tagName = tag.match(/<([a-zA-Z][a-zA-Z0-9]*)/)?.[1];
+        return tagName && tagName[0] === tagName[0].toLowerCase();
+      });
+    }
+
     const totalElements = openingTags.length;
 
     if (totalElements > 800) {
@@ -632,14 +775,16 @@ export function activate(context: vscode.ExtensionContext) {
           )
         );
       }
-      if (!hasLoading) {
-        diagnostics.push(
-          buildDiagnostic(
-            range,
-            'Consider adding loading="lazy" to defer off‑screen images.',
-            'PERF_IMG_LOADING_MISSING',
-            vscode.DiagnosticSeverity.Information
-          )
+      // Only check for loading="lazy" if explicitly required in policy (default: false to reduce noise)
+      const requireLazyLoading = policy.perf?.requireImageLazyLoading ?? false;
+      if (requireLazyLoading && !hasLoading) {
+        addDiagnostic(
+          diagnostics,
+          range,
+          'Consider adding loading="lazy" to defer off‑screen images.',
+          'PERF_IMG_LOADING_MISSING',
+          vscode.DiagnosticSeverity.Information,
+          policy
         );
       }
     }
