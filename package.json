@@ -101,6 +101,7 @@
     "compile": "tsc -watch -p ./",
     "build": "tsc -p ./",
     "typecheck": "tsc --noEmit -p ./",
+    "lint": "npm run typecheck",
     "test": "npm run build && node --test test-wrs-2026.js",
     "package": "npx vsce package"
   },
