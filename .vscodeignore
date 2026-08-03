@@ -1,0 +1,13 @@
+.git/**
+.github/**
+.vscode/**
+node_modules/**
+src/**
+out/**/*.map
+test-*
+*.vsix
+*.tsbuildinfo
+tsconfig.json
+package-lock.json
+icon.svg
+.DS_Store

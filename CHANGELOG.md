@@ -2,6 +2,39 @@
 
 All notable changes to the Kanmi Levers Guard extension will be documented in this file.
 
+## [0.4.0] - 2026-08-03
+
+### Added - WRS Ruleset 2026.1
+
+- Added `Kanmi: Scan Production Artifacts (WRS 2026.1)` for built HTML, CSS, JavaScript, JSON, and PDF files.
+- Enforced the documented 2,000,000-byte uncompressed fetch ceiling per production URL with `wrs/resource-over-2mb`.
+- Added cutoff detection for critical HTML content that begins after byte 2,000,000.
+- Added a configurable 1.5 MB default safety warning for production artifacts.
+- Added separate PDF size handling at 64 MB; PDF checks are not labeled as WRS rules.
+- Added checks for interaction-dependent content, persisted client state, unsupported transports, permission gates, WebGL-only content, non-200 rendering dependencies, unfingerprinted assets, robots-blocked resources, and frozen browser-version assumptions.
+
+### Corrected WRS Classification
+
+- Source-file byte checks now report a static estimate and require production-response verification.
+- DOM size/depth, JavaScript bundle size, script count, and other unpublished numeric thresholds are explicitly labeled as Kanmi heuristics or policy budgets.
+- Removed the obsolete oversized HTML WRS rules.
+
+### Rule ID Migration
+
+Existing policy suppressions continue to work through aliases for renamed heuristic rules:
+
+| Previous ID | 0.4.0 ID |
+|-------------|----------|
+| `WRS_DOM_SIZE_WARNING` | `PERF_DOM_SIZE_HEURISTIC` |
+| `WRS_DOM_SIZE_EXCEEDED` | `PERF_DOM_SIZE_HEURISTIC_HIGH` |
+| `WRS_DOM_DEPTH_WARNING` | `PERF_DOM_DEPTH_HEURISTIC` |
+| `WRS_DOM_DEPTH_EXCEEDED` | `PERF_DOM_DEPTH_HEURISTIC_HIGH` |
+| `WRS_JS_BUNDLE_SIZE_WARNING` | `PERF_JS_BUNDLE_SIZE_HEURISTIC` |
+| `WRS_JS_BUNDLE_SIZE_EXCEEDED` | `PERF_JS_BUNDLE_SIZE_HEURISTIC_HIGH` |
+| `PERF_SCRIPT_COUNT_EXCEEDED` | `PERF_SCRIPT_COUNT_POLICY` |
+
+The obsolete HTML size rules were removed because source-file size cannot establish a production response limit.
+
 ## [0.3.0] - 2025-11-08
 
 ### 🎉 **Major: Next.js 13/14/15 App Router Support**
@@ -47,14 +80,14 @@ All notable changes to the Kanmi Levers Guard extension will be documented in th
 **Improved DOM counting:**
 - ✅ Filters out JSX components (only counts actual HTML elements)
 - ✅ Excludes TypeScript generics from element count
-- ✅ More accurate for React/Next.js files (80% reduction in false warnings)
+- ✅ More accurate for React/Next.js files by filtering capitalized JSX components
 
 ### ⚙️ **New Configuration Options**
 
-**Rule Disabling:**
+**Rule Disabling (historical example; renamed heuristic IDs are aliased in 0.4.0):**
 ```json
 {
-  "disabledRules": ["PERF_IMG_LOADING_MISSING", "WRS_DOM_SIZE_WARNING"]
+  "disabledRules": ["PERF_IMG_LOADING_MISSING", "PERF_DOM_SIZE_HEURISTIC"]
 }
 ```
 
@@ -123,17 +156,19 @@ export default function Page() {
 - Fixed: DOM size calculation including JSX components
 - Fixed: Missing validation for dynamic JSX content in titles
 
-### 📊 **Impact**
+### 📊 **Historical impact notes**
+
+The following notes describe the original 0.3.0 release work. They are qualitative release notes, not independently benchmarked coverage claims.
 
 **Noise Reduction:**
-- ~50% fewer warnings on Next.js files (removed duplicates)
-- ~80% fewer warnings on TypeScript utility files (now skipped)
-- ~70% fewer image warnings (lazy loading now opt-in)
+- Fewer warnings on Next.js files after duplicate checks were removed
+- Pure TypeScript utility files are skipped
+- Image lazy-loading warnings are opt-in
 
 **Accuracy Improvement:**
-- Next.js 13/14/15 App Router: 0% → 95% coverage
-- JSX expression handling: 0% → 100% coverage
-- DOM counting accuracy: +80% for React files
+- Next.js App Router metadata detection was added
+- JSX expression handling was improved
+- DOM counting filters capitalized JSX components
 
 ### 🔄 **Migration from 0.2.x**
 
@@ -146,7 +181,7 @@ export default function Page() {
 **Recommended actions:**
 1. Reload your Extension Development Host to see the improvements
 2. Add `kanmi.policy.json` to customize rules if needed
-3. Test on App Router projects - should now work perfectly!
+3. Test on App Router projects and review diagnostics for the project context.
 
 ---
 
@@ -220,10 +255,10 @@ export default function Page() {
 ### Added - Google WRS Optimization Features 🚀
 
 **Major WRS Enhancements:**
-- ✅ **DOM size monitoring** - Warns if element count > 800, errors if > 1,500 (Google WRS limits)
-- ✅ **DOM depth tracking** - Detects excessive nesting > 25 levels, errors at 32+ (WRS render limit)
+- ✅ **DOM size monitoring** - Warns if element count > 800, warns at > 1,500 (legacy Kanmi heuristics)
+- ✅ **DOM depth tracking** - Detects excessive nesting > 25 levels, warns at 32+ (legacy Kanmi heuristics)
 - ✅ **JavaScript bundle size estimation** - Analyzes imports and warns about heavy dependencies
-- ✅ **Google's 15MB limit warnings** - Alerts at 10MB, critical error at 14MB
+- ✅ **Legacy HTML size heuristics** - Superseded by the WRS 2026.1 production-artifact scanner
 
 **Heavy Dependency Detection:**
 
@@ -239,36 +274,37 @@ Detects 10 common heavy libraries with size estimates and alternatives:
 import moment from 'moment';
 // ⚠️ Heavy dependency: moment (~67KB). Consider date-fns (2KB)
 
-// If total > 1MB:
-// 🔴 Estimated JS bundle size: ~1206KB - exceeds Google WRS 1MB recommendation
+// If total exceeds the legacy Kanmi heuristic:
+// Estimated JS bundle size: ~1206KB - consider code splitting
 ```
 
 ### Improved
 
-**WRS Optimization Coverage:**
-- **Before v0.2.0:** ~35% coverage
-- **After v0.2.0:** ~60% coverage
+**WRS Optimization Notes:**
+- Added DOM size and depth heuristics
+- Added JavaScript dependency-weight estimation
+- Added legacy HTML source-size heuristics, now superseded by the 0.4.0 artifact scanner
 
 **Breakdown:**
-- Head element ordering: 40% (unchanged)
-- HTML size: 30% → 80% (added 15MB warnings)
-- DOM size: 0% → 100% (NEW!)
-- JS weight: 10% → 70% (added import analysis)
+- Head element ordering: unchanged
+- HTML size: legacy source heuristics
+- DOM size: added element-count monitoring
+- JS weight: added import analysis
 
 ### Technical Details
 
 **DOM Size Checking:**
 ```typescript
 const totalElements = text.match(/<[a-zA-Z][^/>]*>/g).length;
-if (totalElements > 800) warn("Approaching WRS limit");
-if (totalElements > 1500) error("Exceeds WRS limit");
+if (totalElements > 800) warn("Exceeds Kanmi performance heuristic");
+if (totalElements > 1500) warn("Exceeds high Kanmi performance heuristic");
 ```
 
 **DOM Depth Calculation:**
 ```typescript
 const maxDepth = calculateMaxDOMDepth(html); // Stack-based tracking
 if (maxDepth > 25) warn();
-if (maxDepth > 32) error(); // Google WRS cannot render
+if (maxDepth > 32) warn(); // Google publishes no numeric WRS DOM-depth limit
 ```
 
 **Import Analysis:**
@@ -368,16 +404,18 @@ await vscode.window.withProgress({
 
 ---
 
-## Future Roadmap
+## Retired Pre-0.4.0 Roadmap
 
-### v0.2.0 (Planned)
+The entries below are retained as historical planning notes. Completed work is documented in the release sections above.
+
+### v0.2.0 (Historical)
 - [ ] Code actions (auto-fix for common issues)
 - [ ] Ignore mechanisms (`<!-- kanmi-ignore -->`)
 - [ ] Vue/Svelte framework support
 - [ ] TypeScript performance anti-patterns
 - [ ] Bundle size warnings
 
-### v0.3.0 (Planned)
+### v0.3.0 (Historical)
 - [ ] Proper HTML/JSX parser (replace regex)
 - [ ] Accessibility checks (WCAG compliance)
 - [ ] More granular severity levels

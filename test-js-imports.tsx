@@ -7,7 +7,7 @@ import * as THREE from 'three'; // ❌ Should warn: 580KB
 import * as d3 from 'd3'; // ❌ Should warn: 250KB
 
 // Total: ~1,206KB
-// Should trigger ERROR: "Estimated JS bundle size: ~1206KB - exceeds Google WRS 1MB recommendation"
+// Should trigger the high Kanmi bundle-size heuristic.
 
 export default function HeavyComponent() {
   const now = moment(); // Using moment

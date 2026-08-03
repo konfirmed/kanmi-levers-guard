@@ -5,9 +5,9 @@
 ![Rating](https://img.shields.io/visual-studio-marketplace/r/kanmiobasa.kanmi-levers-guard)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
-**Catch SEO & performance issues while you code.**
+**Catch SEO, performance, and Googlebot rendering issues while you code.**
 
-A VSCode extension that provides instant, real-time feedback on SEO and performance best practices directly in your editor. No build step required, no configuration needed — just install and start coding better.
+A VSCode extension that provides instant, real-time feedback on SEO, performance, and WRS 2026.1 rules directly in your editor. Source checks are estimates; the production-artifact scan measures uncompressed bytes from built files.
 
 ## TL;DR
 
@@ -31,16 +31,17 @@ A VSCode extension that provides instant, real-time feedback on SEO and performa
 - **Image optimization**: Missing width/height (CLS prevention), lazy loading hints
 - **Next.js Image component**: Validate `sizes` and `priority` attributes
 - **Font loading**: font-display: swap recommendations, excessive preload warnings
-- **HTML size**: Warnings for large files (>100KB) with Web Almanac benchmarking
+- **HTML size**: Kanmi source-size heuristics; these are not Google WRS limits
 - **Resource hints**: Suggest preconnect for external domains
 - **Third-party scripts**: Budget enforcement (configurable limit)
 
-### Google WRS Optimization 🎯 (NEW in v0.2.0)
-- **DOM size monitoring**: Warns at 800+ elements, errors at 1,500+ (Google WRS limits)
-- **DOM depth tracking**: Detects excessive nesting >25 levels, errors at 32+ (WRS render limit)
-- **JavaScript bundle size estimation**: Analyzes imports, warns about heavy dependencies
-- **Google's 15MB limit**: Alerts at 10MB, critical warnings at 14MB
-- **Heavy dependency detection**: Identifies moment, lodash, jquery, and 7 more with lighter alternatives
+### WRS Ruleset 2026.1 🎯
+- **2,000,000-byte fetch ceiling**: Production HTML, CSS, JavaScript, and JSON artifacts are checked per URL using uncompressed on-disk bytes. HTTP headers are not available in a workspace scan.
+- **Cutoff-content detection**: Errors when title, canonical, robots directives, structured data, main content, or script references begin after byte 2,000,000 in built HTML.
+- **Near-limit safety warning**: Configurable production-artifact warning, defaulting to 1.5 MB.
+- **PDF separation**: PDF artifacts use a separate 64 MB document rule and are not treated as WRS HTML resources.
+- **Documented behavior checks**: Detects interaction-dependent content, persisted-state dependencies, permission gates, WebSocket/WebRTC retrieval, WebGL-only content, non-200 rendering dependencies, robots-blocked resources, unfingerprinted assets, and hard-coded browser-version assumptions.
+- **Explicit heuristics**: DOM size/depth, dependency weight, script count, and other performance thresholds are labeled as Kanmi policy heuristics because Google does not publish current numeric WRS limits for them.
 
 ### Developer Experience 🎯
 - **Real-time diagnostics**: See issues as you type
@@ -63,7 +64,7 @@ cd KanmiLabs/extensions/kanmi-levers-guard
 npm install
 npm run build
 npx vsce package
-code --install-extension kanmi-levers-guard-0.0.1.vsix
+code --install-extension kanmi-levers-guard-0.4.0.vsix
 ```
 
 ## Usage
@@ -81,6 +82,17 @@ Run the command palette (`Cmd+Shift+P` / `Ctrl+Shift+P`):
 ```
 
 This analyzes up to 5,000 files in your workspace.
+
+### Production Artifact Scan
+
+Run the command palette and choose:
+```
+> Kanmi: Scan Production Artifacts (WRS 2026.1)
+```
+
+This scans built HTML, CSS, JavaScript, JSON, and PDF files under the configured artifact paths. The default paths are `dist`, `build`, `out`, `public`, `.next`, and `artifacts`. Configure these paths when your build output uses a different directory.
+
+The 2,000,000-byte check is authoritative only when applied to the production response. A local artifact proves its uncompressed body size, but it cannot include HTTP headers or server transformations. Verify the live response for final compliance.
 
 ### Custom Policy File
 
@@ -100,6 +112,10 @@ Create `kanmi.policy.json` at your workspace root to customize thresholds:
     "maxThirdPartyScriptsPerPage": 6,
     "lcpImageKB": 350,
     "requireFontDisplaySwap": true
+  },
+  "wrs": {
+    "resourceNearLimitBytes": 1500000,
+    "productionArtifactPaths": ["dist", "build", ".next"]
   }
 }
 ```
@@ -113,6 +129,8 @@ Available settings (Preferences → Settings → Kanmi Levers Guard):
 | `kanmi.maxThirdPartyScriptsPerPage` | 6 | Maximum third-party scripts allowed per page |
 | `kanmi.lcpImageKB` | 350 | Target size for LCP images (kilobytes) |
 | `kanmi.requireCanonical` | true | Require canonical link in documents |
+| `kanmi.wrsResourceNearLimitBytes` | 1500000 | Production-artifact safety threshold for uncompressed body bytes |
+| `kanmi.productionArtifactPaths` | `dist`, `build`, `out`, `public`, `.next`, `artifacts` | Built-file roots used by the WRS 2026.1 scan |
 
 ## Part of the KanmiLabs Ecosystem
 
@@ -125,7 +143,7 @@ Kanmi Levers Guard is the **first line of defense** in the KanmiLabs performance
 │ 1. Kanmi Levers Guard (VSCode)          │ ← You are here
 │    Static code analysis while coding    │
 │    ✓ Free & open source                 │
-│    ✓ No build step required             │
+│    ✓ No remote service required         │
 │    ✗ No real performance metrics        │
 ├─────────────────────────────────────────┤
 │ 2. KanmiSEO Traffic Levers (CLI)        │
@@ -228,7 +246,7 @@ Kanmi Levers Guard is the **first line of defense** in the KanmiLabs performance
 |------|-------------|-----------|-------------|-----------------|-------------|
 | Lighthouse | Browser / CI | ❌ | ✅ | ✅ | ❌ |
 | ESLint | Editor / CI | ✅ | ❌ | ❌ | ✅ |
-| **Kanmi Levers Guard** | **VS Code (Editor)** | **✅** | **✅** | **✅** | **✅ (coming soon)** |
+| **Kanmi Levers Guard** | **VS Code and artifact scan** | **✅** | **✅** | **✅** | **No automatic code actions** |
 
 ## Why Static Analysis Matters
 
@@ -244,12 +262,14 @@ Kanmi Levers Guard is the **first line of defense** in the KanmiLabs performance
 
 ## Limitations (By Design)
 
-Kanmi Levers Guard is a **static analyzer** — it reads your code but doesn't run it. This means:
+Kanmi Levers Guard is primarily a **static analyzer** — it reads source and built files but does not run a live URL. This means:
 
 ❌ **No runtime metrics**: Can't measure actual TTFB, LCP, CLS
-❌ **No network analysis**: Can't detect slow APIs or CDN issues
+❌ **No live response analysis**: Can't measure HTTP headers, status codes, compression, redirects, CDN behavior, or server transformations
 ❌ **No JavaScript execution**: Can't analyze dynamically rendered content
 ❌ **No multi-page crawling**: Analyzes files individually
+
+The production-artifact scan is stronger than a source estimate, but it still measures local uncompressed body bytes. The authoritative 2,000,000-byte check belongs against each production URL response, including its HTTP headers.
 
 **For these capabilities**, use:
 - **KanmiSEO Traffic Levers** → Network timing, crawl budget analysis
@@ -264,12 +284,17 @@ Found a bug or have a feature request? Open an issue on [GitHub](https://github.
 This extension is built on industry research and official recommendations:
 
 - **Web Almanac 2024**: HTML size benchmarks, Open Graph adoption stats
-- **Google Web Rendering Service (WRS)**: Head element ordering, crawl budget optimization
+- **Google Web Rendering Service (WRS)**: Per-URL fetch ceiling and rendering behavior
 - **Core Web Vitals**: CLS prevention (image dimensions), LCP optimization (blocking resources)
 - **Web.dev Performance Guides**: Async/defer patterns, resource hints, font optimization
 
 **Key sources**:
-- [Google WRS Best Practices (Dec 2024)](https://developers.google.com/search/blog/2024/12/crawling-december-resources)
+- [Google Search updates](https://developers.google.com/search/updates)
+- [Googlebot documentation](https://developers.google.com/search/docs/crawling-indexing/googlebot)
+- [JavaScript SEO basics](https://developers.google.com/search/docs/crawling-indexing/javascript/javascript-seo-basics)
+- [Lazy-loading guidance](https://developers.google.com/search/docs/crawling-indexing/javascript/lazy-loading)
+- [Fix JavaScript-related search issues](https://developers.google.com/search/docs/crawling-indexing/javascript/fix-search-javascript)
+- [Google WRS resource access guidance](https://developers.google.com/search/blog/2024/12/crawling-december-resources)
 - [Web Almanac 2024 - Performance Chapter](https://almanac.httparchive.org/en/2024/performance)
 - [Core Web Vitals](https://web.dev/vitals/)
 

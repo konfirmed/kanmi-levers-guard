@@ -5,7 +5,7 @@
   <meta name="description" content="Testing new WRS features">
 </head>
 <body>
-  <!-- Deep nesting test (should warn at 25+ levels) -->
+  <!-- Deep nesting test (should trigger the Kanmi heuristic at 25+ levels) -->
   <div><div><div><div><div><div><div><div><div><div>
     <div><div><div><div><div><div><div><div><div><div>
       <div><div><div><div><div><div><div><div><div><div>
@@ -14,7 +14,7 @@
     </div></div></div></div></div></div></div></div></div></div>
   </div></div></div></div></div></div></div></div></div></div>
 
-  <!-- Large DOM test (should warn at 800+ elements) -->
+  <!-- Large DOM test (should trigger the Kanmi heuristic at 800+ elements) -->
   <ul>
     <li>Item 1</li>
     <li>Item 2</li>

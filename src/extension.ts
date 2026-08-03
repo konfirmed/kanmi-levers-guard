@@ -1,6 +1,20 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
+import {
+  filterDisabledFindings,
+  getWrsResourceKind,
+  scanProductionArtifact,
+  scanSourceSize,
+  scanWrsBehaviorRules,
+  shouldScanProductionArtifactPath,
+  WRS_DEFAULT_NEAR_LIMIT_BYTES,
+  WRS_FETCH_LIMIT_BYTES,
+  WrsFinding
+} from './wrs';
+
+const MAX_SOURCE_SCAN_BYTES = 5_000_000;
+const DEFAULT_PRODUCTION_ARTIFACT_PATHS = ['dist', 'build', 'out', 'public', '.next', 'artifacts'];
 
 /**
  * Interface describing an optional policy file.
@@ -21,6 +35,10 @@ interface Policy {
     lcpImageKB?: number;
     requireFontDisplaySwap?: boolean;
     requireImageLazyLoading?: boolean;
+  };
+  wrs?: {
+    resourceNearLimitBytes?: number;
+    productionArtifactPaths?: string[];
   };
   disabledRules?: string[];
 }
@@ -69,10 +87,55 @@ function addDiagnostic(
   policy: Policy
 ): void {
   // Skip if this rule is disabled
-  if (policy?.disabledRules?.includes(code)) {
+  if (isRuleDisabled(policy, code)) {
     return;
   }
   diagnostics.push(buildDiagnostic(range, message, code, severity));
+}
+
+const RULE_ALIASES: Record<string, string[]> = {
+  PERF_DOM_SIZE_HEURISTIC: ['WRS_DOM_SIZE_WARNING'],
+  PERF_DOM_SIZE_HEURISTIC_HIGH: ['WRS_DOM_SIZE_EXCEEDED'],
+  PERF_DOM_DEPTH_HEURISTIC: ['WRS_DOM_DEPTH_WARNING'],
+  PERF_DOM_DEPTH_HEURISTIC_HIGH: ['WRS_DOM_DEPTH_EXCEEDED'],
+  PERF_JS_BUNDLE_SIZE_HEURISTIC: ['WRS_JS_BUNDLE_SIZE_WARNING'],
+  PERF_JS_BUNDLE_SIZE_HEURISTIC_HIGH: ['WRS_JS_BUNDLE_SIZE_EXCEEDED'],
+  PERF_SCRIPT_COUNT_POLICY: ['PERF_SCRIPT_COUNT_EXCEEDED']
+};
+
+function isRuleDisabled(policy: Policy, code: string): boolean {
+  const disabledRules = policy.disabledRules ?? [];
+  return disabledRules.includes(code) || (RULE_ALIASES[code] ?? []).some(alias => disabledRules.includes(alias));
+}
+
+function appendWrsFindings(
+  findings: WrsFinding[],
+  diagnostics: vscode.Diagnostic[],
+  doc: vscode.TextDocument,
+  policy: Policy
+): void {
+  for (const finding of filterDisabledFindings(findings, policy.disabledRules)) {
+    const position = finding.offset === undefined
+      ? new vscode.Position(0, 0)
+      : doc.positionAt(finding.offset);
+    const range = new vscode.Range(position, position);
+    const severity = finding.severity === 'error'
+      ? vscode.DiagnosticSeverity.Error
+      : vscode.DiagnosticSeverity.Warning;
+    addDiagnostic(
+      diagnostics,
+      range,
+      `${finding.message} Classification: ${finding.classification}.`,
+      finding.code,
+      severity,
+      policy
+    );
+  }
+}
+
+function isPathWithin(parent: string, candidate: string): boolean {
+  const relative = path.relative(parent, candidate);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
 /**
@@ -126,6 +189,145 @@ export function activate(context: vscode.ExtensionContext) {
 
   // Debounce timer for real-time scanning
   let debounceTimer: NodeJS.Timeout | undefined;
+
+  function getWrsNearLimitBytes(policy: Policy): number {
+    const configuredBytes = policy.wrs?.resourceNearLimitBytes ??
+      (vscode.workspace.getConfiguration().get('kanmi.wrsResourceNearLimitBytes', WRS_DEFAULT_NEAR_LIMIT_BYTES) as number);
+    const nearLimitBytes = Number.isFinite(configuredBytes) ? configuredBytes : WRS_DEFAULT_NEAR_LIMIT_BYTES;
+    return Math.min(Math.max(Math.round(nearLimitBytes), 1), WRS_FETCH_LIMIT_BYTES - 1);
+  }
+
+  function getProductionArtifactRoots(policy: Policy): string[] {
+    const folder = vscode.workspace.workspaceFolders?.[0];
+    if (!folder) {
+      return [];
+    }
+
+    const configuredPaths = policy.wrs?.productionArtifactPaths ??
+      (vscode.workspace.getConfiguration().get('kanmi.productionArtifactPaths', DEFAULT_PRODUCTION_ARTIFACT_PATHS) as string[]);
+    return configuredPaths
+      .filter(artifactPath => typeof artifactPath === 'string' && artifactPath.length > 0)
+      .map(artifactPath => path.resolve(folder.uri.fsPath, artifactPath));
+  }
+
+  function isProductionArtifactFile(filePath: string, policy: Policy): boolean {
+    return getProductionArtifactRoots(policy).some(root => isPathWithin(root, filePath));
+  }
+
+  function isExtensionInternalPath(filePath: string): boolean {
+    const extensionPath = path.resolve(context.extensionPath);
+    const resolvedPath = path.resolve(filePath);
+    return isPathWithin(path.join(extensionPath, 'src'), resolvedPath) ||
+      isPathWithin(path.join(extensionPath, 'out'), resolvedPath);
+  }
+
+  async function readRobotsText(artifactRoot: string, workspaceRoot: string): Promise<string | undefined> {
+    const candidates = Array.from(new Set([
+      path.join(artifactRoot, 'robots.txt'),
+      path.join(workspaceRoot, 'robots.txt'),
+      path.join(workspaceRoot, 'public', 'robots.txt')
+    ]));
+
+    for (const candidate of candidates) {
+      try {
+        const stat = await fs.promises.stat(candidate);
+        if (stat.isFile()) {
+          return await fs.promises.readFile(candidate, 'utf8');
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    return undefined;
+  }
+
+  async function scanProductionArtifactFile(filePath: string, artifactRoot: string, policy: Policy): Promise<void> {
+    const resourceKind = getWrsResourceKind(filePath);
+    if (!resourceKind) {
+      return;
+    }
+
+    let content: Buffer;
+    try {
+      content = await fs.promises.readFile(filePath);
+    } catch {
+      return;
+    }
+
+    const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? artifactRoot;
+    const robotsText = resourceKind === 'html'
+      ? await readRobotsText(artifactRoot, workspaceRoot)
+      : undefined;
+    const findings = filterDisabledFindings(scanProductionArtifact(filePath, content, {
+      nearLimitBytes: getWrsNearLimitBytes(policy),
+      artifactRoot,
+      robotsText
+    }), policy.disabledRules);
+    if (!findings.length) {
+      collection.delete(vscode.Uri.file(filePath));
+      return;
+    }
+
+    let doc: vscode.TextDocument | undefined;
+    if (resourceKind !== 'pdf') {
+      try {
+        doc = await vscode.workspace.openTextDocument(vscode.Uri.file(filePath));
+      } catch {
+        doc = undefined;
+      }
+    }
+
+    const diagnostics: vscode.Diagnostic[] = [];
+    for (const finding of findings) {
+      const position = doc && finding.offset !== undefined
+        ? doc.positionAt(finding.offset)
+        : new vscode.Position(0, 0);
+      const severity = finding.severity === 'error'
+        ? vscode.DiagnosticSeverity.Error
+        : vscode.DiagnosticSeverity.Warning;
+      addDiagnostic(
+        diagnostics,
+        new vscode.Range(position, position),
+        `${finding.message} Classification: ${finding.classification}.`,
+        finding.code,
+        severity,
+        policy
+      );
+    }
+    collection.set(vscode.Uri.file(filePath), diagnostics);
+  }
+
+  async function collectProductionArtifactFiles(
+    directory: string,
+    artifactRoot: string,
+    files: Array<{ filePath: string; artifactRoot: string }>,
+    limit: number
+  ): Promise<void> {
+    if (files.length >= limit) {
+      return;
+    }
+
+    let entries: fs.Dirent[];
+    try {
+      entries = await fs.promises.readdir(directory, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (files.length >= limit || entry.name === 'node_modules' || entry.name === '.git') {
+        return;
+      }
+
+      const filePath = path.join(directory, entry.name);
+      if (entry.isDirectory()) {
+        await collectProductionArtifactFiles(filePath, artifactRoot, files, limit);
+      } else if (entry.isFile() && shouldScanProductionArtifactPath(filePath) && !isExtensionInternalPath(filePath)) {
+        files.push({ filePath, artifactRoot });
+      }
+    }
+  }
 
   /**
    * Context-aware HTML head rules for traditional HTML files
@@ -458,21 +660,20 @@ export function activate(context: vscode.ExtensionContext) {
       return;
     }
 
-    // Skip the extension's own source files and compiled output
-    if (doc.fileName.includes('kanmi-levers-guard')) {
+    const documentPath = path.resolve(doc.uri.fsPath);
+    const extensionPath = path.resolve(context.extensionPath);
+    if (isPathWithin(path.join(extensionPath, 'src'), documentPath) ||
+        isPathWithin(path.join(extensionPath, 'out'), documentPath)) {
       return;
     }
 
-    // PERFORMANCE FIX: Skip files larger than 500KB
     const text = doc.getText();
-    const fileSizeKB = Buffer.byteLength(text, 'utf8') / 1024;
-    if (fileSizeKB > 500) {
-      console.log(`[Kanmi] Skipping large file: ${doc.fileName} (${Math.round(fileSizeKB)}KB)`);
-      return;
-    }
-
     const diagnostics: vscode.Diagnostic[] = [];
     const policy = readPolicy();
+
+    if (isProductionArtifactFile(documentPath, policy)) {
+      return;
+    }
 
     // Next.js App Router detection (Next.js 13+)
     const isAppRouterFile = /[\/\\]app[\/\\]/.test(doc.fileName) &&
@@ -501,6 +702,23 @@ export function activate(context: vscode.ExtensionContext) {
     // These are likely utility files, types, configs, etc.
     if (isPureTypeScript && !isAppRouterFile && !isNextJs && !isReact) {
       return; // Skip SEO validation for non-UI TypeScript files
+    }
+
+    const fileSizeBytes = Buffer.byteLength(text, 'utf8');
+    if (!isProductionArtifactFile(documentPath, policy)) {
+      appendWrsFindings(
+        scanSourceSize(fileSizeBytes, getWrsNearLimitBytes(policy)),
+        diagnostics,
+        doc,
+        policy
+      );
+    }
+    appendWrsFindings(scanWrsBehaviorRules(text), diagnostics, doc, policy);
+
+    if (fileSizeBytes > MAX_SOURCE_SCAN_BYTES) {
+      console.log(`[Kanmi] Skipping large source file: ${doc.fileName} (${Math.round(fileSizeBytes / 1024)}KB)`);
+      collection.set(doc.uri, diagnostics);
+      return;
     }
 
     // CONTEXT-AWARE RULE APPLICATION
@@ -584,49 +802,7 @@ export function activate(context: vscode.ExtensionContext) {
       }
     }
 
-    // HTML size estimation (warn if >100KB)
-    const htmlSizeKB = Buffer.byteLength(text, 'utf8') / 1024;
-    if (htmlSizeKB > 100 && htmlSizeKB <= 150) {
-      diagnostics.push(
-        buildDiagnostic(
-          new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1)),
-          `HTML file is ${Math.round(htmlSizeKB)}KB. Consider code splitting or removing inline data. (Web Almanac p90: 147KB)`,
-          'PERF_HTML_SIZE_LARGE',
-          vscode.DiagnosticSeverity.Warning
-        )
-      );
-    } else if (htmlSizeKB > 150 && htmlSizeKB <= 10000) {
-      diagnostics.push(
-        buildDiagnostic(
-          new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1)),
-          `HTML file is ${Math.round(htmlSizeKB)}KB - larger than 90% of websites. This impacts parsing performance.`,
-          'PERF_HTML_SIZE_EXCESSIVE',
-          vscode.DiagnosticSeverity.Error
-        )
-      );
-    } else if (htmlSizeKB > 10000) {
-      // WRS: Google's 15MB limit warning
-      diagnostics.push(
-        buildDiagnostic(
-          new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1)),
-          `HTML file is ${Math.round(htmlSizeKB/1024)}MB. Approaching Google's 15MB WRS limit. Consider pagination or dynamic loading.`,
-          'WRS_HTML_SIZE_APPROACHING_LIMIT',
-          vscode.DiagnosticSeverity.Warning
-        )
-      );
-    }
-    if (htmlSizeKB > 14000) {
-      diagnostics.push(
-        buildDiagnostic(
-          new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1)),
-          `HTML file is ${Math.round(htmlSizeKB/1024)}MB. Google WRS will truncate at 15MB. URGENT: Reduce file size!`,
-          'WRS_HTML_SIZE_CRITICAL',
-          vscode.DiagnosticSeverity.Error
-        )
-      );
-    }
-
-    // WRS: DOM size optimization (Google recommends < 1,500 elements)
+    // DOM size thresholds are Kanmi performance heuristics, not Google limits.
     // Count opening tags (excluding self-closing and closing tags)
     // For JSX/TSX files, we need to be more selective to avoid counting JSX components
     let openingTags: string[] = text.match(/<[a-zA-Z][^/>]*>/g) || [];
@@ -644,46 +820,46 @@ export function activate(context: vscode.ExtensionContext) {
     const totalElements = openingTags.length;
 
     if (totalElements > 800) {
-      diagnostics.push(
-        buildDiagnostic(
-          new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1)),
-          `DOM has ${totalElements} elements. Google WRS recommends < 800 for optimal rendering. Consider pagination or lazy loading.`,
-          'WRS_DOM_SIZE_WARNING',
-          vscode.DiagnosticSeverity.Information
-        )
+      addDiagnostic(
+        diagnostics,
+        new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1)),
+        `DOM has ${totalElements} elements. This exceeds a Kanmi performance heuristic; Google does not publish a current numeric WRS DOM limit. Consider pagination or lazy loading.`,
+        'PERF_DOM_SIZE_HEURISTIC',
+        vscode.DiagnosticSeverity.Information,
+        policy
       );
     }
     if (totalElements > 1500) {
-      diagnostics.push(
-        buildDiagnostic(
-          new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1)),
-          `DOM has ${totalElements} elements. Google WRS hard limit is 1,500. Page may not render correctly in search results.`,
-          'WRS_DOM_SIZE_EXCEEDED',
-          vscode.DiagnosticSeverity.Error
-        )
+      addDiagnostic(
+        diagnostics,
+        new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1)),
+        `DOM has ${totalElements} elements. This exceeds a high Kanmi performance heuristic; Google does not publish a current numeric WRS DOM limit.`,
+        'PERF_DOM_SIZE_HEURISTIC_HIGH',
+        vscode.DiagnosticSeverity.Warning,
+        policy
       );
     }
 
-    // WRS: DOM depth check (Google recommends < 32 levels)
+    // DOM depth thresholds are Kanmi performance heuristics, not Google limits.
     const maxDepth = calculateMaxDOMDepth(text);
     if (maxDepth > 25) {
-      diagnostics.push(
-        buildDiagnostic(
-          new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1)),
-          `DOM depth is ${maxDepth} levels. Google WRS recommends < 32 to avoid rendering issues. Flatten your HTML structure.`,
-          'WRS_DOM_DEPTH_WARNING',
-          vscode.DiagnosticSeverity.Information
-        )
+      addDiagnostic(
+        diagnostics,
+        new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1)),
+        `DOM depth is ${maxDepth} levels. This exceeds a Kanmi performance heuristic; Google does not publish a current numeric WRS DOM-depth limit. Flatten your HTML structure.`,
+        'PERF_DOM_DEPTH_HEURISTIC',
+        vscode.DiagnosticSeverity.Information,
+        policy
       );
     }
     if (maxDepth > 32) {
-      diagnostics.push(
-        buildDiagnostic(
-          new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1)),
-          `DOM depth is ${maxDepth} levels - exceeds Google WRS limit of 32. Googlebot may fail to render this page.`,
-          'WRS_DOM_DEPTH_EXCEEDED',
-          vscode.DiagnosticSeverity.Error
-        )
+      addDiagnostic(
+        diagnostics,
+        new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1)),
+        `DOM depth is ${maxDepth} levels. This exceeds a high Kanmi performance heuristic; Google does not publish a current numeric WRS DOM-depth limit.`,
+        'PERF_DOM_DEPTH_HEURISTIC_HIGH',
+        vscode.DiagnosticSeverity.Warning,
+        policy
       );
     }
 
@@ -903,36 +1079,35 @@ export function activate(context: vscode.ExtensionContext) {
       }
     }
 
-    // Warn if estimated bundle size is large
+    // Bundle thresholds are Kanmi performance heuristics, not Google limits.
     if (totalEstimatedBundleSize > 500) {
-      diagnostics.push(
-        buildDiagnostic(
-          new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1)),
-          `Estimated JS bundle size: ~${totalEstimatedBundleSize}KB from heavy dependencies. Google WRS recommends < 1MB total. Consider code splitting.`,
-          'WRS_JS_BUNDLE_SIZE_WARNING',
-          vscode.DiagnosticSeverity.Warning
-        )
+      addDiagnostic(
+        diagnostics,
+        new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1)),
+        `Estimated JS bundle size: ~${totalEstimatedBundleSize}KB from heavy dependencies. This exceeds a Kanmi performance heuristic; Google does not publish a current numeric WRS JavaScript bundle ceiling. Consider code splitting.`,
+        'PERF_JS_BUNDLE_SIZE_HEURISTIC',
+        vscode.DiagnosticSeverity.Warning,
+        policy
       );
     }
     if (totalEstimatedBundleSize > 1000) {
-      diagnostics.push(
-        buildDiagnostic(
-          new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1)),
-          `Estimated JS bundle size: ~${totalEstimatedBundleSize}KB - exceeds Google WRS 1MB recommendation. This will impact crawl budget and rendering.`,
-          'WRS_JS_BUNDLE_SIZE_EXCEEDED',
-          vscode.DiagnosticSeverity.Error
-        )
+      addDiagnostic(
+        diagnostics,
+        new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1)),
+        `Estimated JS bundle size: ~${totalEstimatedBundleSize}KB. This exceeds a high Kanmi performance heuristic; Google does not publish a current numeric WRS JavaScript bundle ceiling. Consider code splitting.`,
+        'PERF_JS_BUNDLE_SIZE_HEURISTIC_HIGH',
+        vscode.DiagnosticSeverity.Warning,
+        policy
       );
     }
 
     // Count third‑party scripts and ensure async/defer.
     const scriptRegex = /<script[^>]+src=["']([^"']+)["'][^>]*>/gi;
-    let scriptCount = 0;
+    let thirdPartyScriptCount = 0;
     let sMatch: RegExpExecArray | null;
     const externalDomains = new Set<string>();
 
     while ((sMatch = scriptRegex.exec(text)) !== null) {
-      scriptCount++;
       const tag = sMatch[0];
       const src = sMatch[1];
       const attrs = tag;
@@ -940,6 +1115,10 @@ export function activate(context: vscode.ExtensionContext) {
       const start = doc.positionAt(sMatch.index);
       const end = doc.positionAt(sMatch.index + sMatch[0].length);
       const range = new vscode.Range(start, end);
+
+      if (/^(?:https?:)?\/\//i.test(src)) {
+        thirdPartyScriptCount++;
+      }
 
       // Track external domains for preconnect suggestions
       try {
@@ -962,12 +1141,12 @@ export function activate(context: vscode.ExtensionContext) {
     }
     const maxTP = policy.perf?.maxThirdPartyScriptsPerPage ??
       (vscode.workspace.getConfiguration().get('kanmi.maxThirdPartyScriptsPerPage', 6) as number);
-    if (scriptCount > maxTP) {
+    if (thirdPartyScriptCount > maxTP) {
       diagnostics.push(
         buildDiagnostic(
           new vscode.Range(new vscode.Position(0, 0), new vscode.Position(0, 1)),
-          `Document contains ${scriptCount} script tags. Budget is ${maxTP}.`,
-          'PERF_SCRIPT_COUNT_EXCEEDED',
+          `Document contains ${thirdPartyScriptCount} third-party script tags. This exceeds the configured Kanmi policy budget of ${maxTP}; Google does not publish a current numeric request or script-count limit.`,
+          'PERF_SCRIPT_COUNT_POLICY',
           vscode.DiagnosticSeverity.Warning
         )
       );
@@ -1056,6 +1235,51 @@ export function activate(context: vscode.ExtensionContext) {
         }
 
         vscode.window.showInformationMessage(`Kanmi Levers Guard: Scanned ${files.length} files.`);
+      });
+    })
+  );
+
+  context.subscriptions.push(
+    vscode.commands.registerCommand('kanmi.scanProductionArtifacts', async () => {
+      const policy = readPolicy();
+      const artifactFiles: Array<{ filePath: string; artifactRoot: string }> = [];
+      const roots = getProductionArtifactRoots(policy);
+
+      for (const root of roots) {
+        try {
+          const stat = await fs.promises.stat(root);
+          if (stat.isDirectory()) {
+            await collectProductionArtifactFiles(root, root, artifactFiles, 5000);
+          } else if (stat.isFile() && shouldScanProductionArtifactPath(root) && !isExtensionInternalPath(root)) {
+            artifactFiles.push({ filePath: root, artifactRoot: path.dirname(root) });
+          }
+        } catch {
+          continue;
+        }
+      }
+
+      await vscode.window.withProgress({
+        location: vscode.ProgressLocation.Notification,
+        title: 'Kanmi WRS Ruleset 2026.1',
+        cancellable: true
+      }, async (progress: vscode.Progress<{ message?: string; increment?: number }>, token: vscode.CancellationToken) => {
+        progress.report({ message: `Scanning ${artifactFiles.length} production artifacts...` });
+
+        for (let i = 0; i < artifactFiles.length; i++) {
+          if (token.isCancellationRequested) {
+            vscode.window.showWarningMessage('Kanmi production artifact scan cancelled.');
+            return;
+          }
+
+          const artifact = artifactFiles[i];
+          await scanProductionArtifactFile(artifact.filePath, artifact.artifactRoot, policy);
+          progress.report({
+            message: `${i + 1}/${artifactFiles.length} artifacts`,
+            increment: 100 / Math.max(artifactFiles.length, 1)
+          });
+        }
+
+        vscode.window.showInformationMessage(`Kanmi WRS Ruleset 2026.1: scanned ${artifactFiles.length} production artifacts.`);
       });
     })
   );
