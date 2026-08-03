@@ -3,6 +3,9 @@
   "displayName": "Kanmi Levers Guard - SEO & Performance Linter",
   "description": "Catch SEO & performance issues while you code. Real-time diagnostics for meta tags, blocking resources, image optimization, and more.",
   "version": "0.4.0",
+  "workspaces": [
+    "packages/*"
+  ],
   "publisher": "kanmiobasa",
   "author": {
     "name": "Kanmi Obasa",
@@ -97,12 +100,20 @@
     }
   },
   "scripts": {
-    "vscode:prepublish": "tsc -p ./",
+    "vscode:prepublish": "npm run build",
     "compile": "tsc -watch -p ./",
-    "build": "tsc -p ./",
-    "typecheck": "tsc --noEmit -p ./",
+    "build": "npm run build:core && npm run build:cli && tsc -p ./ && npm run stage:core-runtime",
+    "build:core": "npm run build --workspace @kanmi/core",
+    "build:cli": "npm run build --workspace @kanmi/cli",
+    "stage:core-runtime": "node scripts/stage-core-runtime.js",
+    "typecheck": "npm run build:core && npm run typecheck:core && npm run build:cli && npm run typecheck:cli && tsc --noEmit -p ./",
+    "typecheck:core": "npm run typecheck --workspace @kanmi/core",
+    "typecheck:cli": "npm run typecheck --workspace @kanmi/cli",
     "lint": "npm run typecheck",
-    "test": "npm run build && node --test test-wrs-2026.js",
+    "test:core": "npm run build:core && node --test packages/core/test/*.js",
+    "test:cli": "npm run build:core && npm run build:cli && node --test packages/cli/test/*.js",
+    "test": "npm run test:core && npm run test:cli && npm run build && node --test test-wrs-2026.js",
+    "cli": "npm run build:core && npm run build:cli && node packages/cli/dist/index.js",
     "package": "npx vsce package"
   },
   "devDependencies": {

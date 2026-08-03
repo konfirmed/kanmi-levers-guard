@@ -1,0 +1,20 @@
+{
+  "name": "@kanmi/cli",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "bin": {
+    "kanmi": "./dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@kanmi/core": "0.1.0"
+  },
+  "scripts": {
+    "build": "tsc -p ./",
+    "typecheck": "tsc --noEmit -p ./"
+  }
+}

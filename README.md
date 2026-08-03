@@ -94,6 +94,22 @@ This scans built HTML, CSS, JavaScript, JSON, and PDF files under the configured
 
 The 2,000,000-byte check is authoritative only when applied to the production response. A local artifact proves its uncompressed body size, but it cannot include HTTP headers or server transformations. Verify the live response for final compliance.
 
+### CLI Preview
+
+The shared core and first CLI client are currently available from the repository while the CLI surface is stabilized. Scan built artifacts with:
+
+```bash
+npm run cli -- scan dist
+```
+
+Use JSON output for CI tooling, a custom byte safety threshold, or repeated rule suppression:
+
+```bash
+npm run cli -- scan dist --format json --near-limit-bytes 1200000 --disable-rule wrs/resource-near-limit
+```
+
+The CLI supports `stylish` and `json` output. It exits `0` with no findings, `1` for warnings only, `2` when errors are present, `3` for runtime failures, and `64` for invalid command-line usage. It reads `kanmi.policy.json` by default and scans the same artifact families and WRS rules as the extension.
+
 ### Custom Policy File
 
 Create `kanmi.policy.json` at your workspace root to customize thresholds:

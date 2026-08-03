@@ -1,0 +1,28 @@
+{
+  "name": "@kanmi/core",
+  "version": "0.1.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js"
+    },
+    "./policy": {
+      "types": "./dist/policy.d.ts",
+      "require": "./dist/policy.js"
+    },
+    "./wrs": {
+      "types": "./dist/wrs.d.ts",
+      "require": "./dist/wrs.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc -p ./",
+    "typecheck": "tsc --noEmit -p ./"
+  }
+}

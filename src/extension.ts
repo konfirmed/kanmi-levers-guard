@@ -4,6 +4,8 @@ import * as path from 'path';
 import {
   filterDisabledFindings,
   getWrsResourceKind,
+  isRuleDisabled,
+  normalizePolicy,
   scanProductionArtifact,
   scanSourceSize,
   scanWrsBehaviorRules,
@@ -12,6 +14,7 @@ import {
   WRS_FETCH_LIMIT_BYTES,
   WrsFinding
 } from './wrs';
+import type { Policy } from './wrs';
 
 const MAX_SOURCE_SCAN_BYTES = 5_000_000;
 const DEFAULT_PRODUCTION_ARTIFACT_PATHS = ['dist', 'build', 'out', 'public', '.next', 'artifacts'];
@@ -21,28 +24,6 @@ const DEFAULT_PRODUCTION_ARTIFACT_PATHS = ['dist', 'build', 'out', 'public', '.n
  * Users can place a kanmi.policy.json at the root of their workspace to
  * override default budgets and thresholds.
  */
-interface Policy {
-  seo?: {
-    titleMin?: number;
-    titleMax?: number;
-    metaDescriptionMin?: number;
-    metaDescriptionMax?: number;
-    requireCanonical?: boolean;
-    requireJsonLdFor?: string[];
-  };
-  perf?: {
-    maxThirdPartyScriptsPerPage?: number;
-    lcpImageKB?: number;
-    requireFontDisplaySwap?: boolean;
-    requireImageLazyLoading?: boolean;
-  };
-  wrs?: {
-    resourceNearLimitBytes?: number;
-    productionArtifactPaths?: string[];
-  };
-  disabledRules?: string[];
-}
-
 /**
  * Attempt to read a policy JSON file from the root of the first workspace folder.
  */
@@ -54,7 +35,7 @@ function readPolicy(): Policy {
   const policyPath = path.join(folder.uri.fsPath, 'kanmi.policy.json');
   try {
     const content = fs.readFileSync(policyPath, 'utf8');
-    return JSON.parse(content);
+    return normalizePolicy(JSON.parse(content));
   } catch {
     return {};
   }
@@ -87,25 +68,10 @@ function addDiagnostic(
   policy: Policy
 ): void {
   // Skip if this rule is disabled
-  if (isRuleDisabled(policy, code)) {
+  if (isRuleDisabled(policy.disabledRules, code)) {
     return;
   }
   diagnostics.push(buildDiagnostic(range, message, code, severity));
-}
-
-const RULE_ALIASES: Record<string, string[]> = {
-  PERF_DOM_SIZE_HEURISTIC: ['WRS_DOM_SIZE_WARNING'],
-  PERF_DOM_SIZE_HEURISTIC_HIGH: ['WRS_DOM_SIZE_EXCEEDED'],
-  PERF_DOM_DEPTH_HEURISTIC: ['WRS_DOM_DEPTH_WARNING'],
-  PERF_DOM_DEPTH_HEURISTIC_HIGH: ['WRS_DOM_DEPTH_EXCEEDED'],
-  PERF_JS_BUNDLE_SIZE_HEURISTIC: ['WRS_JS_BUNDLE_SIZE_WARNING'],
-  PERF_JS_BUNDLE_SIZE_HEURISTIC_HIGH: ['WRS_JS_BUNDLE_SIZE_EXCEEDED'],
-  PERF_SCRIPT_COUNT_POLICY: ['PERF_SCRIPT_COUNT_EXCEEDED']
-};
-
-function isRuleDisabled(policy: Policy, code: string): boolean {
-  const disabledRules = policy.disabledRules ?? [];
-  return disabledRules.includes(code) || (RULE_ALIASES[code] ?? []).some(alias => disabledRules.includes(alias));
 }
 
 function appendWrsFindings(
@@ -203,7 +169,7 @@ export function activate(context: vscode.ExtensionContext) {
       return [];
     }
 
-    const configuredPaths = policy.wrs?.productionArtifactPaths ??
+    const configuredPaths: string[] = policy.wrs?.productionArtifactPaths ??
       (vscode.workspace.getConfiguration().get('kanmi.productionArtifactPaths', DEFAULT_PRODUCTION_ARTIFACT_PATHS) as string[]);
     return configuredPaths
       .filter(artifactPath => typeof artifactPath === 'string' && artifactPath.length > 0)
