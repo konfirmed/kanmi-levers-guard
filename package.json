@@ -2,7 +2,7 @@
   "name": "kanmi-levers-guard",
   "displayName": "Kanmi Levers Guard - SEO & Performance Linter",
   "description": "Catch SEO & performance issues while you code. Real-time diagnostics for meta tags, blocking resources, image optimization, and more.",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "publisher": "kanmiobasa",
   "author": {
     "name": "Kanmi Obasa",
@@ -41,6 +41,9 @@
     "onStartupFinished"
   ],
   "main": "./out/extension.js",
+  "bin": {
+    "kanmi-guard": "./out/cli.js"
+  },
   "contributes": {
     "commands": [
       {
@@ -102,7 +105,8 @@
     "build": "tsc -p ./",
     "typecheck": "tsc --noEmit -p ./",
     "lint": "npm run typecheck",
-    "test": "npm run build && node --test test-wrs-2026.js",
+    "test": "npm run build && node --test test-wrs-2026.js test-core-cli.js",
+    "guard": "npm run build && node out/cli.js check",
     "package": "npx vsce package"
   },
   "devDependencies": {
