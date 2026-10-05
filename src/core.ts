@@ -87,8 +87,11 @@ export function readGuardPolicy(workspaceRoot: string): GuardPolicy {
 export function scanSourceGuard(
   text: string,
   policy: GuardPolicy = {},
-  options: SourceGuardOptions = {}
+  optionsOrNearLimit: SourceGuardOptions | number = {}
 ): GuardFinding[] {
+  const options: SourceGuardOptions = typeof optionsOrNearLimit === 'number'
+    ? { nearLimitBytes: optionsOrNearLimit }
+    : optionsOrNearLimit;
   const nearLimitBytes = options.nearLimitBytes ?? resolveWrsNearLimitBytes(policy);
   const context = detectSourceContext(options.filePath, text);
   const wrsFindings = filterDisabledFindings([
