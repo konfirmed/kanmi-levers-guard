@@ -5,13 +5,14 @@ import * as path from 'path';
 import {
   DEFAULT_PRODUCTION_ARTIFACT_PATHS,
   GuardFailOn,
+  GuardFinding,
   GuardPolicy,
   readGuardPolicy,
   resolveWrsNearLimitBytes,
   scanProductionGuard,
   shouldFailGuard
 } from './core';
-import { shouldScanProductionArtifactPath, WrsFinding } from './wrs';
+import { shouldScanProductionArtifactPath } from './wrs';
 
 interface CliOptions {
   workspaceRoot: string;
@@ -22,7 +23,7 @@ interface CliOptions {
 
 interface GuardResult {
   file: string;
-  findings: WrsFinding[];
+  findings: GuardFinding[];
 }
 
 function parseArgs(argv: string[]): CliOptions {
@@ -139,8 +140,9 @@ function printHuman(results: GuardResult[]): void {
 
   const findings = results.flatMap(result => result.findings);
   const errors = findings.filter(finding => finding.severity === 'error').length;
-  const warnings = findings.length - errors;
-  console.log(`\nKanmi Guard: ${errors} error(s), ${warnings} warning(s).`);
+  const warnings = findings.filter(finding => finding.severity === 'warning').length;
+  const info = findings.filter(finding => finding.severity === 'info').length;
+  console.log(`\nKanmi Guard: ${errors} error(s), ${warnings} warning(s), ${info} info finding(s).`);
 }
 
 try {
@@ -151,7 +153,8 @@ try {
   if (options.json) {
     console.log(JSON.stringify({ results, summary: {
       errors: findings.filter(finding => finding.severity === 'error').length,
-      warnings: findings.filter(finding => finding.severity === 'warning').length
+      warnings: findings.filter(finding => finding.severity === 'warning').length,
+      info: findings.filter(finding => finding.severity === 'info').length
     } }, null, 2));
   } else {
     printHuman(results);
