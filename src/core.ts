@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import {
   filterDisabledFindings,
+  getWrsResourceKind,
   scanProductionArtifact,
   scanSourceSize,
   scanWrsBehaviorRules,
@@ -9,8 +10,13 @@ import {
   WRS_FETCH_LIMIT_BYTES,
   WrsFinding
 } from './wrs';
+import {
+  scanUniversalSourceRules,
+  UniversalFinding
+} from './rules/universal';
 
 export type GuardFailOn = 'error' | 'warning';
+export type GuardFinding = WrsFinding | UniversalFinding;
 
 export interface GuardPolicy {
   seo?: {
@@ -76,13 +82,16 @@ export function scanSourceGuard(
   text: string,
   policy: GuardPolicy = {},
   nearLimitBytes = resolveWrsNearLimitBytes(policy)
-): WrsFinding[] {
-  const findings = [
+): GuardFinding[] {
+  const wrsFindings = filterDisabledFindings([
     ...scanSourceSize(Buffer.byteLength(text, 'utf8'), nearLimitBytes),
     ...scanWrsBehaviorRules(text)
-  ];
+  ], policy.disabledRules);
 
-  return filterDisabledFindings(findings, policy.disabledRules);
+  return [
+    ...wrsFindings,
+    ...scanUniversalSourceRules(text, policy)
+  ];
 }
 
 export function scanProductionGuard(
@@ -90,19 +99,23 @@ export function scanProductionGuard(
   content: Buffer,
   options: ProductionGuardOptions,
   policy: GuardPolicy = {}
-): WrsFinding[] {
-  const findings = scanProductionArtifact(filePath, content, {
+): GuardFinding[] {
+  const findings: GuardFinding[] = filterDisabledFindings(scanProductionArtifact(filePath, content, {
     nearLimitBytes: options.nearLimitBytes ?? resolveWrsNearLimitBytes(policy),
     artifactRoot: options.artifactRoot,
     robotsText: options.robotsText
-  });
+  }), policy.disabledRules);
 
-  return filterDisabledFindings(findings, policy.disabledRules);
+  if (getWrsResourceKind(filePath) === 'html') {
+    findings.push(...scanUniversalSourceRules(content.toString('utf8'), policy));
+  }
+
+  return findings;
 }
 
-export function shouldFailGuard(findings: WrsFinding[], failOn: GuardFailOn = 'error'): boolean {
+export function shouldFailGuard(findings: GuardFinding[], failOn: GuardFailOn = 'error'): boolean {
   if (failOn === 'warning') {
-    return findings.length > 0;
+    return findings.some(finding => finding.severity === 'error' || finding.severity === 'warning');
   }
   return findings.some(finding => finding.severity === 'error');
 }
