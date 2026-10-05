@@ -10,6 +10,7 @@ import {
   WRS_FETCH_LIMIT_BYTES,
   WrsFinding
 } from './wrs';
+import { detectSourceContext } from './context';
 import {
   scanUniversalSourceRules,
   UniversalFinding
@@ -38,6 +39,11 @@ export interface GuardPolicy {
     productionArtifactPaths?: string[];
   };
   disabledRules?: string[];
+}
+
+export interface SourceGuardOptions {
+  filePath?: string;
+  nearLimitBytes?: number;
 }
 
 export interface ProductionGuardOptions {
@@ -81,8 +87,10 @@ export function readGuardPolicy(workspaceRoot: string): GuardPolicy {
 export function scanSourceGuard(
   text: string,
   policy: GuardPolicy = {},
-  nearLimitBytes = resolveWrsNearLimitBytes(policy)
+  options: SourceGuardOptions = {}
 ): GuardFinding[] {
+  const nearLimitBytes = options.nearLimitBytes ?? resolveWrsNearLimitBytes(policy);
+  const context = detectSourceContext(options.filePath, text);
   const wrsFindings = filterDisabledFindings([
     ...scanSourceSize(Buffer.byteLength(text, 'utf8'), nearLimitBytes),
     ...scanWrsBehaviorRules(text)
@@ -90,7 +98,7 @@ export function scanSourceGuard(
 
   return [
     ...wrsFindings,
-    ...scanUniversalSourceRules(text, policy)
+    ...scanUniversalSourceRules(text, policy, context)
   ];
 }
 
@@ -107,7 +115,8 @@ export function scanProductionGuard(
   }), policy.disabledRules);
 
   if (getWrsResourceKind(filePath) === 'html') {
-    findings.push(...scanUniversalSourceRules(content.toString('utf8'), policy));
+    const text = content.toString('utf8');
+    findings.push(...scanUniversalSourceRules(text, policy, detectSourceContext(filePath, text)));
   }
 
   return findings;
