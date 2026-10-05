@@ -1,3 +1,5 @@
+import { SourceContext } from '../context';
+
 export type UniversalSeverity = 'warning' | 'info';
 
 export interface UniversalFinding {
@@ -36,17 +38,26 @@ function pushFinding(
   }
 }
 
-function scanImageRules(text: string, policy: UniversalRulePolicy): UniversalFinding[] {
+function scanImageRules(
+  text: string,
+  policy: UniversalRulePolicy,
+  context?: SourceContext
+): UniversalFinding[] {
   const findings: UniversalFinding[] = [];
   const imageRegex = /<img\s+([^>]*?)>/gi;
   let match: RegExpExecArray | null;
 
   while ((match = imageRegex.exec(text)) !== null) {
     const attrs = match[1];
+    const hasSpreadProps = Boolean(context?.isJsxLike && /\{\s*\.\.\./.test(attrs));
+    if (hasSpreadProps) {
+      continue;
+    }
+
     const hasAlt = /\balt\s*=/.test(attrs);
     const hasWidth = /\bwidth\s*=/.test(attrs);
     const hasHeight = /\bheight\s*=/.test(attrs);
-    const hasLoading = /\bloading\s*=\s*["'](?:lazy|eager)["']/i.test(attrs);
+    const hasLoading = /\bloading\s*=\s*(?:["'](?:lazy|eager)["']|\{[^}]+\})/i.test(attrs);
 
     if (!hasAlt) {
       pushFinding(findings, policy, {
@@ -55,7 +66,7 @@ function scanImageRules(text: string, policy: UniversalRulePolicy): UniversalFin
         message: 'Image missing alt attribute. Add a meaningful `alt` for accessibility and SEO.',
         offset: match.index,
         length: match[0].length,
-        evidence: { element: 'img' }
+        evidence: { element: 'img', framework: context?.framework }
       });
     }
 
@@ -66,7 +77,7 @@ function scanImageRules(text: string, policy: UniversalRulePolicy): UniversalFin
         message: 'Image missing width/height attributes. Explicit dimensions prevent layout shift.',
         offset: match.index,
         length: match[0].length,
-        evidence: { hasWidth, hasHeight }
+        evidence: { hasWidth, hasHeight, framework: context?.framework }
       });
     }
 
@@ -77,7 +88,7 @@ function scanImageRules(text: string, policy: UniversalRulePolicy): UniversalFin
         message: 'Consider adding loading="lazy" to defer off-screen images.',
         offset: match.index,
         length: match[0].length,
-        evidence: { element: 'img' }
+        evidence: { element: 'img', framework: context?.framework }
       });
     }
   }
@@ -85,7 +96,18 @@ function scanImageRules(text: string, policy: UniversalRulePolicy): UniversalFin
   return findings;
 }
 
-function scanScriptRules(text: string, policy: UniversalRulePolicy): UniversalFinding[] {
+function scanScriptRules(
+  text: string,
+  policy: UniversalRulePolicy,
+  context?: SourceContext
+): UniversalFinding[] {
+  // Raw <script> blocking/count heuristics describe rendered HTML behavior.
+  // Next.js source is transformed by the framework, so evaluate these rules
+  // against built HTML instead of treating TSX/JSX as if it were final markup.
+  if (context?.isNextJs && !context.isHtml) {
+    return [];
+  }
+
   const findings: UniversalFinding[] = [];
   const scriptRegex = /<script[^>]+src=["']([^"']+)["'][^>]*>/gi;
   let match: RegExpExecArray | null;
@@ -108,7 +130,7 @@ function scanScriptRules(text: string, policy: UniversalRulePolicy): UniversalFi
         message: 'Script tag without `async`, `defer`, or `type="module"` can block rendering.',
         offset: match.index,
         length: match[0].length,
-        evidence: { src }
+        evidence: { src, framework: context?.framework }
       });
     }
   }
@@ -120,7 +142,7 @@ function scanScriptRules(text: string, policy: UniversalRulePolicy): UniversalFi
       severity: 'warning',
       message: `Document contains ${thirdPartyScriptCount} third-party script tags. This exceeds the configured Kanmi policy budget of ${maxThirdPartyScripts}.`,
       offset: 0,
-      evidence: { thirdPartyScriptCount, maxThirdPartyScripts }
+      evidence: { thirdPartyScriptCount, maxThirdPartyScripts, framework: context?.framework }
     });
   }
 
@@ -129,10 +151,11 @@ function scanScriptRules(text: string, policy: UniversalRulePolicy): UniversalFi
 
 export function scanUniversalSourceRules(
   text: string,
-  policy: UniversalRulePolicy = {}
+  policy: UniversalRulePolicy = {},
+  context?: SourceContext
 ): UniversalFinding[] {
   return [
-    ...scanImageRules(text, policy),
-    ...scanScriptRules(text, policy)
+    ...scanImageRules(text, policy, context),
+    ...scanScriptRules(text, policy, context)
   ];
 }
